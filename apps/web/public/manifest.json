@@ -1,0 +1,12 @@
+{
+  "name": "PharmaOS",
+  "short_name": "PharmaOS",
+  "description": "Enterprise Pharmacy Management Platform",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d9488",
+  "icons": [
+    { "src": "/icon", "sizes": "192x192", "type": "image/png" }
+  ]
+}

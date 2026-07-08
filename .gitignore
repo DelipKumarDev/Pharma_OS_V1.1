@@ -1,0 +1,53 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Production builds
+.next
+dist
+build
+out
+
+# Turbo
+.turbo
+
+# Testing
+coverage
+playwright-report
+test-results
+
+# Env files
+.env
+.env.local
+.env.production.local
+.env.development.local
+.env.test.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# MSW
+public/mockServiceWorker.js
+
+# Storybook
+storybook-static
+
+# PWA
+**/public/sw.js
+**/public/workbox-*.js

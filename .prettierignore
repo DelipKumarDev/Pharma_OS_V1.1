@@ -1,0 +1,9 @@
+.next
+dist
+build
+out
+node_modules
+.turbo
+coverage
+public/mockServiceWorker.js
+pnpm-lock.yaml

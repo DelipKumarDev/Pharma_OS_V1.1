@@ -1,0 +1,403 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   PHARMAOS — AYUSH MODERN DESIGN SYSTEM
+   Palette: Deep Emerald · Saffron Gold · Royal Indigo · Soft Ivory
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* Core palette — Soft Ivory base */
+    --background: 40 30% 98%;
+    --foreground: 224 32% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 32% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 32% 14%;
+
+    /* Primary: Deep Emerald #0F766E */
+    --primary: 175 77% 26%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary: Saffron cream tint */
+    --secondary: 38 60% 94%;
+    --secondary-foreground: 32 80% 28%;
+
+    --muted: 40 22% 95%;
+    --muted-foreground: 215 16% 48%;
+
+    /* Accent: Saffron Gold #D97706 */
+    --accent: 32 95% 44%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Warm ivory border */
+    --border: 38 20% 88%;
+    --input: 38 20% 88%;
+    --ring: 175 77% 26%;
+
+    /* Radius: 16px floating-card feel */
+    --radius: 1rem;
+
+    /* Sidebar — Deep Emerald */
+    --sidebar-background: 174 68% 11%;
+    --sidebar-foreground: 160 22% 80%;
+    --sidebar-primary: 162 65% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 174 55% 17%;
+    --sidebar-accent-foreground: 160 22% 80%;
+    --sidebar-border: 174 50% 15%;
+    --sidebar-ring: 162 65% 52%;
+
+    /* Semantic color tokens */
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --error: 0 72% 51%;
+    --error-foreground: 0 0% 100%;
+    --info: 244 58% 51%;
+    --info-foreground: 0 0% 100%;
+
+    /* Elevation — emerald-tinted soft shadows */
+    --shadow-sm: 0 2px 8px 0 rgb(15 118 110 / 0.06), 0 1px 3px 0 rgb(0 0 0 / 0.04);
+    --shadow-md: 0 8px 24px -4px rgb(15 118 110 / 0.12), 0 3px 8px -2px rgb(0 0 0 / 0.06);
+    --shadow-lg: 0 20px 40px -8px rgb(15 118 110 / 0.15), 0 8px 16px -4px rgb(0 0 0 / 0.08);
+    --shadow-card: 0 4px 16px rgb(15 118 110 / 0.08), 0 1px 4px rgb(0 0 0 / 0.04);
+    --shadow-card-hover: 0 12px 32px -4px rgb(15 118 110 / 0.18), 0 4px 12px rgb(0 0 0 / 0.08);
+    --shadow-float: 0 8px 32px -4px rgb(15 118 110 / 0.18), 0 4px 12px rgb(0 0 0 / 0.08);
+
+    /* Z-index scale */
+    --z-sidebar: 40;
+    --z-header: 50;
+    --z-modal: 100;
+    --z-tooltip: 200;
+    --z-toast: 300;
+
+    /* Layout tokens */
+    --sidebar-width: 260px;
+    --sidebar-collapsed-width: 64px;
+    --header-height: 60px;
+  }
+
+  .dark {
+    --background: 220 32% 8%;
+    --foreground: 210 20% 90%;
+
+    --card: 220 30% 11%;
+    --card-foreground: 210 20% 90%;
+
+    --popover: 220 30% 11%;
+    --popover-foreground: 210 20% 90%;
+
+    --primary: 175 65% 42%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 28% 16%;
+    --secondary-foreground: 210 20% 82%;
+
+    --muted: 220 28% 14%;
+    --muted-foreground: 215 18% 54%;
+
+    --accent: 32 85% 52%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 28% 18%;
+    --input: 220 28% 18%;
+    --ring: 175 65% 42%;
+
+    --sidebar-background: 174 68% 7%;
+    --sidebar-foreground: 160 18% 75%;
+    --sidebar-primary: 162 65% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 174 50% 13%;
+    --sidebar-accent-foreground: 160 18% 75%;
+    --sidebar-border: 174 45% 11%;
+    --sidebar-ring: 162 65% 52%;
+
+    --shadow-card: 0 4px 16px rgb(0 0 0 / 0.30), 0 1px 4px rgb(0 0 0 / 0.20);
+    --shadow-card-hover: 0 12px 32px -4px rgb(0 0 0 / 0.40), 0 4px 12px rgb(0 0 0 / 0.25);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    transition-property: background-color, border-color, color, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: ease;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans), system-ui, sans-serif;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+
+  /* Headings use Plus Jakarta Sans */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading), var(--font-sans), sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2;
+  }
+
+  /* Warm scrollbar matching ivory theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(175 40% 72%);
+    border-radius: 99px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(175 60% 50%);
+  }
+
+  ::selection {
+    background: hsl(175 77% 26% / 0.18);
+    color: hsl(175 77% 22%);
+  }
+
+  /* Typography scale */
+  h1 { @apply scroll-m-20 text-2xl font-bold tracking-tight; }
+  h2 { @apply scroll-m-20 text-xl font-semibold tracking-tight; }
+  h3 { @apply scroll-m-20 text-lg font-semibold; }
+  h4 { @apply scroll-m-20 text-base font-semibold; }
+}
+
+@layer utilities {
+  /* ── Text gradient ── */
+  .text-gradient-emerald {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(175 77% 26%), hsl(175 65% 42%));
+  }
+
+  .text-gradient-saffron {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(32 95% 44%), hsl(38 90% 58%));
+  }
+
+  /* ── Shimmer skeleton ── */
+  .skeleton {
+    @apply animate-shimmer bg-gradient-to-r from-muted via-muted/50 to-muted;
+    background-size: 200% 100%;
+  }
+
+  /* ── Glass card ── */
+  .glass {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  }
+
+  /* ── Indian identity — subtle rangoli dot pattern ── */
+  .rangoli-bg {
+    position: relative;
+  }
+  .rangoli-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(circle, hsl(175 77% 26% / 0.05) 1.5px, transparent 1.5px),
+      radial-gradient(circle, hsl(32 95% 44% / 0.04) 1px, transparent 1px);
+    background-size: 28px 28px, 14px 14px;
+    background-position: 0 0, 7px 7px;
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  /* ── Saffron accent line (top border accent) ── */
+  .saffron-accent {
+    border-top: 3px solid hsl(32 95% 44%);
+  }
+
+  /* ── Emerald accent line ── */
+  .emerald-accent {
+    border-top: 3px solid hsl(175 77% 26%);
+  }
+
+  /* ── Indigo accent line ── */
+  .indigo-accent {
+    border-top: 3px solid hsl(244 58% 51%);
+  }
+
+  /* ── Pharmacy identity — Batch badge ── */
+  .batch-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: hsl(175 77% 26% / 0.1);
+    color: hsl(175 77% 22%);
+    font-family: var(--font-mono), monospace;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── Expiry indicators ── */
+  .expiry-critical {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: hsl(0 72% 51% / 0.1);
+    color: hsl(0 72% 42%);
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .expiry-warning {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: hsl(32 95% 44% / 0.1);
+    color: hsl(32 95% 34%);
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  /* ── Stock gauge ── */
+  .stock-gauge {
+    height: 4px;
+    border-radius: 99px;
+    background: hsl(38 20% 88%);
+    overflow: hidden;
+  }
+
+  /* ── Dot separator ── */
+  .dot-sep::after {
+    content: '·';
+    @apply mx-1 text-muted-foreground;
+  }
+
+  /* ── Status dot ── */
+  .status-dot {
+    @apply inline-block h-2 w-2 rounded-full;
+  }
+
+  /* ── Table row hover ── */
+  .table-row-hover {
+    transition: background-color 150ms ease;
+  }
+  .table-row-hover:hover {
+    background: hsl(175 77% 26% / 0.04);
+  }
+
+  /* ── Sidebar width tokens ── */
+  .w-sidebar { width: var(--sidebar-width); }
+  .w-sidebar-collapsed { width: var(--sidebar-collapsed-width); }
+  .h-header { height: var(--header-height); }
+
+  /* ── No scrollbar ── */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* ── Content padding ── */
+  .content-pad { @apply px-4 py-4 md:px-6 md:py-6; }
+
+  /* ── Card interactive — floating card feel ── */
+  .card-interactive {
+    cursor: pointer;
+    transition: all 200ms ease;
+    box-shadow: var(--shadow-card);
+    border-radius: var(--radius);
+  }
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* ── Mono data text ── */
+  .font-data {
+    font-family: var(--font-mono), monospace;
+  }
+
+  /* ── KPI gradient cards — Ayush Modern palette ── */
+  .kpi-teal {
+    background: linear-gradient(135deg, hsl(175 77% 22%) 0%, hsl(175 65% 36%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(175 77% 22% / 0.35);
+  }
+  .kpi-blue {
+    background: linear-gradient(135deg, hsl(244 58% 44%) 0%, hsl(244 50% 58%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(244 58% 44% / 0.35);
+  }
+  .kpi-amber {
+    background: linear-gradient(135deg, hsl(32 95% 38%) 0%, hsl(38 88% 52%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(32 95% 38% / 0.35);
+  }
+  .kpi-rose {
+    background: linear-gradient(135deg, hsl(0 72% 46%) 0%, hsl(0 62% 58%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(0 72% 46% / 0.30);
+  }
+  .kpi-purple {
+    background: linear-gradient(135deg, hsl(280 65% 44%) 0%, hsl(280 55% 58%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(280 65% 44% / 0.30);
+  }
+  .kpi-emerald {
+    background: linear-gradient(135deg, hsl(160 84% 30%) 0%, hsl(160 70% 44%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(160 84% 30% / 0.35);
+  }
+  .kpi-saffron {
+    background: linear-gradient(135deg, hsl(32 95% 38%) 0%, hsl(38 90% 54%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(32 95% 38% / 0.35);
+  }
+  .kpi-indigo {
+    background: linear-gradient(135deg, hsl(244 58% 44%) 0%, hsl(244 50% 60%) 100%);
+    color: white;
+    box-shadow: 0 4px 20px hsl(244 58% 44% / 0.30);
+  }
+}
+
+/* ============================================================
+   PRINT STYLES — Billing / Reports
+   ============================================================ */
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+
+  body {
+    @apply bg-white text-black;
+    font-size: 12px;
+  }
+
+  .print-full {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
