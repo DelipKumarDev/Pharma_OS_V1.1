@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatNumber } from '@pharmaos/utils';
 import { formatDate } from '@pharmaos/utils';
+import { apiFetch } from '@/lib/api';
 
 type AlertSeverity = 'warning' | 'error' | 'critical';
 
@@ -44,7 +45,7 @@ interface DashboardData {
 const PIE_COLORS = ['#0F766E', '#D97706', '#4338CA', '#059669', '#dc2626', '#7c3aed'];
 
 async function fetchDashboard(): Promise<DashboardData> {
-  const res = await fetch('/api/dashboard');
+  const res = await apiFetch('/api/dashboard');
   const json = await res.json() as { success: boolean; data: DashboardData };
   if (!json.success) throw new Error('Failed to load dashboard');
   return json.data;

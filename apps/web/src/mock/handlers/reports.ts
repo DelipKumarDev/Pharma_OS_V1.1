@@ -106,7 +106,7 @@ function buildSummary(days: number) {
   const totalUPI = slice.reduce((s, d) => s + d.upi, 0);
   const totalCard = slice.reduce((s, d) => s + d.card, 0);
   const totalCredit = slice.reduce((s, d) => s + d.credit, 0);
-  const bestDay = slice.reduce((best, d) => d.revenue > best.revenue ? d : best, slice[0]);
+  const bestDay = slice.reduce((best, d) => d.revenue > best.revenue ? d : best, slice[0]!);
   return {
     totalRevenue,
     totalBills,

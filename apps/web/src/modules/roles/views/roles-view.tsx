@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 const MODULES = [
   { key: 'medicines', label: 'Medicine Master', icon: '💊' },
@@ -26,13 +27,14 @@ const MODULES = [
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'export'] as const;
 
 async function fetchRoles(): Promise<Role[]> {
-  const res = await fetch('/api/roles');
+  const res = await apiFetch('/api/roles');
   const json = await res.json() as { success: boolean; data: { data: Role[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Role[]);
 }
 
 async function createRole(data: { name: string; description: string; permissionIds: string[] }): Promise<Role> {
-  const res = await fetch('/api/roles', {
+  const res = await apiFetch('/api/roles', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -43,7 +45,7 @@ async function createRole(data: { name: string; description: string; permissionI
 }
 
 async function deleteRole(id: string) {
-  const res = await fetch(`/api/roles/${id}`, { method: 'DELETE' });
+  const res = await apiFetch(`/api/roles/${id}`, { method: 'DELETE' });
   const json = await res.json() as { success: boolean; message?: string };
   if (!json.success) throw new Error(json.message ?? 'Cannot delete');
 }

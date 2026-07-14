@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Line,
@@ -10,7 +11,7 @@ import {
   TrendingUp, Receipt, Package, Users, Download, FileSpreadsheet,
   FileText, AlertTriangle, ShieldCheck, Activity, Percent,
   ArrowUpRight, ArrowDownRight, Clock, Star, Printer, Calculator,
-  Banknote, CheckCircle,
+  Banknote, CheckCircle, ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCurrency, formatDate, formatNumber } from '@pharmaos/utils';
@@ -20,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -85,8 +87,9 @@ const tooltipStyle = {
 // ─── API ────────────────────────────────────────────────────────────────────
 
 async function fetchReports(days: number): Promise<ReportsData> {
-  const res = await fetch(`/api/reports?days=${days}`);
-  const json = await res.json() as { data: ReportsData };
+  const res = await apiFetch(`/api/reports?days=${days}`);
+  const json = await res.json() as { success: boolean; data: ReportsData };
+  if (!res.ok || !json.data) throw new Error('Failed to load reports');
   return json.data;
 }
 
@@ -249,8 +252,17 @@ function GSTTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
   const totals = data?.gstTotals;
   const slabs = data?.gstSlabs ?? [];
 
-  function exportGSTR1() {
-    toast.success('GSTR-1 data exported — ready for upload to GST portal');
+  async function exportGSTR1() {
+    const now = new Date();
+    const r = await apiFetch(`/api/reports/gstr1?month=${now.getMonth() + 1}&year=${now.getFullYear()}&format=csv`);
+    if (!r.ok) { toast.error('GSTR-1 export failed'); return; }
+    const blob = await r.blob();
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `gstr1-${String(now.getMonth() + 1).padStart(2, '0')}${now.getFullYear()}.csv`,
+    });
+    a.click();
+    toast.success('GSTR-1 exported — B2CS + HSN summary ready for GST portal upload');
   }
 
   return (
@@ -366,8 +378,18 @@ function GSTTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
               <CardTitle className="text-sm">Schedule H Drug Register</CardTitle>
               <CardDescription>Legally mandated prescription drug dispensing log (Drugs & Cosmetics Act)</CardDescription>
             </div>
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => toast.success('Schedule H register exported as PDF')}>
-              <Printer className="h-3 w-3" /> Print Register
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => {
+              const r = await apiFetch('/api/schedule-register/export');
+              if (!r.ok) { toast.error('Export failed'); return; }
+              const blob = await r.blob();
+              const a = Object.assign(document.createElement('a'), {
+                href: URL.createObjectURL(blob),
+                download: `schedule-register-${new Date().toISOString().slice(0, 10)}.csv`,
+              });
+              a.click();
+              toast.success('Schedule register exported');
+            }}>
+              <Printer className="h-3 w-3" /> Export Register
             </Button>
           </div>
         </CardHeader>
@@ -408,6 +430,7 @@ function GSTTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
 // ─── Tab: Inventory Intelligence ─────────────────────────────────────────────
 
 function StockTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
+  const router = useRouter();
   const summary = data?.summary;
   const deadStockPct = summary ? Math.round((summary.deadStockValue / summary.totalStockValue) * 100) : 0;
 
@@ -489,7 +512,12 @@ function StockTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
               <CardTitle className="text-sm">Dead Stock Alert</CardTitle>
               <CardDescription>Items with no sales in 90+ days — capital locked up</CardDescription>
             </div>
-            <Badge variant="warning">{formatCurrency(data?.summary.deadStockValue ?? 0)} at risk</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="warning">{formatCurrency(data?.summary.deadStockValue ?? 0)} at risk</Badge>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => router.push('/stock?tab=inventory')}>
+                View Stock <ArrowRight className="h-3 w-3" />
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -503,8 +531,8 @@ function StockTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {data?.deadStock.map((item) => (
-                  <tr key={item.name} className="hover:bg-muted/30">
+                {data?.deadStock.map((item, i) => (
+                  <tr key={`${item.name}-${i}`} className="hover:bg-muted/30">
                     <td className="py-2 pr-3 font-medium">{item.name}</td>
                     <td className="py-2 pr-3"><Badge variant="muted" className="text-2xs">{item.category}</Badge></td>
                     <td className="py-2 pr-3">{item.qty}</td>
@@ -549,7 +577,7 @@ function ProfitTab({ data, loading }: { data?: ReportsData; loading: boolean }) 
           {loading ? <Skeleton className="h-80 w-full" /> : (
             <div className="space-y-3">
               {medicines.slice(0, 8).map((m, i) => (
-                <div key={m.name} className="flex items-center gap-3">
+                <div key={`${m.name}-${i}`} className="flex items-center gap-3">
                   <span className="w-5 text-xs text-muted-foreground font-mono text-right">{i + 1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
@@ -606,6 +634,7 @@ function ProfitTab({ data, loading }: { data?: ReportsData; loading: boolean }) 
 // ─── Tab: Customer Insights ──────────────────────────────────────────────────
 
 function CustomersTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
+  const router = useRouter();
   const summary = data?.summary;
   const total = (summary?.newCustomers ?? 0) + (summary?.returningCustomers ?? 0);
   const retentionPct = total > 0 ? Math.round(((summary?.returningCustomers ?? 0) / total) * 100) : 0;
@@ -671,14 +700,21 @@ function CustomersTab({ data, loading }: { data?: ReportsData; loading: boolean 
         {/* Top customers */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Top Customers by Spend</CardTitle>
-            <CardDescription>Highest value customers this period</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm">Top Customers by Spend</CardTitle>
+                <CardDescription>Highest value customers this period</CardDescription>
+              </div>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => router.push('/customers')}>
+                All Customers <ArrowRight className="h-3 w-3" />
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? <Skeleton className="h-48 w-full" /> : (
               <div className="space-y-2">
                 {data?.topCustomers.map((c, i) => (
-                  <div key={c.name} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/40 transition-colors">
+                  <div key={`${c.name}-${i}`} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/40 transition-colors">
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
                       {i + 1}
                     </div>
@@ -881,6 +917,7 @@ function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading:
 // ─── Main View ───────────────────────────────────────────────────────────────
 
 export function ReportsView() {
+  const router = useRouter();
   const [days, setDays] = useState(30);
   const [activeTab, setActiveTab] = useState('sales');
 
@@ -889,17 +926,16 @@ export function ReportsView() {
     queryFn: () => fetchReports(days),
   });
 
-  function exportCSV() {
-    if (!data) return;
-    const rows = data.dailySales.map((d) =>
-      `${d.date},${d.revenue},${d.bills},${d.gst},${d.cash},${d.upi},${d.card},${d.credit}`
-    );
-    const csv = ['Date,Revenue,Bills,GST,Cash,UPI,Card,Credit', ...rows].join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `pharmaos-report-${days}d-${new Date().toISOString().substring(0, 10)}.csv`;
-    a.click(); URL.revokeObjectURL(url);
-    toast.success('Report exported as CSV');
+  async function exportCSV() {
+    const r = await apiFetch(`/api/reports/export?days=${days}`);
+    if (!r.ok) { toast.error('Export failed'); return; }
+    const blob = await r.blob();
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `pharmaos-report-${days}d-${new Date().toISOString().substring(0, 10)}.csv`,
+    });
+    a.click();
+    toast.success('Bill-level report exported as CSV');
   }
 
   function printReport() {

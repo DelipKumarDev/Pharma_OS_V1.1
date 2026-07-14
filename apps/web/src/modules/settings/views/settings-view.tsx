@@ -9,8 +9,9 @@ import {
   Building2, Globe,
   Package, Pill, Receipt, Banknote, Smartphone, BookOpen,
   ChevronRight, Info, Mail, MessageCircle, PhoneCall,
-  FormInput, ShieldCheck,
+  FormInput, ShieldCheck, UserCog, Shield, ClipboardList, ExternalLink,
 } from 'lucide-react';
+import Link from 'next/link';
 import { FormFieldsSection } from '../components/form-fields-section';
 import { AccessControlSection } from '../components/access-control-section';
 import { toast } from 'sonner';
@@ -22,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -34,12 +36,14 @@ type SettingsData = {
 };
 
 async function fetchSettings(): Promise<SettingsData> {
-  const r = await fetch('/api/settings');
-  return ((await r.json()) as { data: SettingsData }).data;
+  const r = await apiFetch('/api/settings');
+  const j = await r.json() as { success: boolean; data: SettingsData };
+  if (!j.success || !j.data) throw new Error('Failed to load settings');
+  return j.data;
 }
 
 async function saveSection(section: string, data: Record<string, unknown>) {
-  const r = await fetch(`/api/settings/${section}`, {
+  const r = await apiFetch(`/api/settings/${section}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
@@ -225,7 +229,7 @@ function ProfileSection({ data, onSave }: { data: SettingsData; onSave: (section
 }
 
 function TaxSection({ data, onSave }: { data: SettingsData; onSave: (s: string, d: Record<string, unknown>) => Promise<void> }) {
-  const [form, setForm] = useState({ ...data.tax });
+  const [form, setForm] = useState({ ...data.tax, gstSlabs: data.tax?.gstSlabs ?? [] });
   const [billing, setBilling] = useState({ ...data.billing });
   const [saving, setSaving] = useState(false);
 
@@ -331,38 +335,120 @@ function ImportSection() {
     { value: 'medicines', label: 'Medicine Catalog', Icon: Pill, desc: 'Drug master list with prices and GST', ext: '.xlsx .csv' },
     { value: 'inventory', label: 'Inventory / Stock', Icon: Package, desc: 'Current stock with batches and expiry', ext: '.xlsx .csv' },
     { value: 'customers', label: 'Customers', Icon: Users, desc: 'Customer names, phones and addresses', ext: '.xlsx .csv' },
-    { value: 'vendors', label: 'Vendors / Suppliers', Icon: Building2, desc: 'Supplier list with payment terms', ext: '.xlsx .csv' },
-    { value: 'backup', label: 'Full Backup Restore', Icon: Archive, desc: 'Restore from a PharmaOS .zip backup', ext: '.zip' },
+    { value: 'vendors', label: 'Vendors / Suppliers', Icon: Building2, desc: 'Supplier list with payment terms', ext: '.csv' },
   ];
 
   const EXPORT_TYPES = [
     { value: 'medicines', label: 'Medicine Catalog', Icon: Pill },
     { value: 'inventory', label: 'Current Stock', Icon: Package },
     { value: 'customers', label: 'Customers', Icon: Users },
+    { value: 'vendors', label: 'Vendors', Icon: Building2 },
     { value: 'bills', label: 'All Bills', Icon: Receipt },
-    { value: 'backup', label: 'Full Backup (.zip)', Icon: Archive },
+    { value: 'backup', label: 'Full Data (.json)', Icon: Archive },
   ];
 
   function handleFile(f: File) { setFile(f); setPhase('ready'); }
   function handleDrop(e: React.DragEvent) { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }
 
+  // Minimal RFC-4180 CSV parser — handles quoted fields, escaped quotes, CRLF
+  function parseCsv(text: string): Array<Record<string, string>> {
+    const rows: string[][] = [];
+    let cell = '', row: string[] = [], inQuotes = false;
+    const src = text.replace(/^﻿/, '');
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (src[i + 1] === '"') { cell += '"'; i++; }
+          else inQuotes = false;
+        } else cell += ch;
+      } else if (ch === '"') inQuotes = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && src[i + 1] === '\n') i++;
+        row.push(cell); cell = '';
+        if (row.some((c) => c.trim() !== '')) rows.push(row);
+        row = [];
+      } else cell += ch;
+    }
+    row.push(cell);
+    if (row.some((c) => c.trim() !== '')) rows.push(row);
+    if (rows.length < 2) return [];
+    const headers = rows[0]!.map((h) => h.trim());
+    return rows.slice(1).map((r) => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? '').trim()])));
+  }
+
   async function startImport() {
     if (!file) return;
+    if (!/\.csv$/i.test(file.name)) {
+      toast.error('Please upload a .csv file', { description: 'Open your Excel file and use "Save As → CSV" first.' });
+      return;
+    }
     setPhase('importing');
     setProgress(0);
-    const iv = setInterval(() => setProgress((p) => Math.min(p + 4 + Math.random() * 6, 95)), 150);
-    const res = await fetch(`/api/import/${type}`, { method: 'POST', body: new FormData() });
-    const data = await res.json() as { data: { imported: number; skipped: number; errors: number } };
-    clearInterval(iv);
-    setProgress(100);
-    setResult(data.data);
-    setPhase('done');
+    const iv = setInterval(() => setProgress((p) => Math.min(p + 4 + Math.random() * 6, 90)), 150);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length === 0) throw new Error('File has no data rows (header + at least one row required)');
+      const res = await apiFetch(`/api/settings/import/${type}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json() as { success: boolean; message?: string; data: { imported: number; skipped: number; errors: number; errorDetails?: Array<{ row: number; message: string }> } };
+      if (!res.ok || !data.success) throw new Error(data.message ?? 'Import failed');
+      clearInterval(iv);
+      setProgress(100);
+      setResult(data.data);
+      setPhase('done');
+      if (data.data.errors > 0 && data.data.errorDetails?.length) {
+        toast.warning(`${data.data.errors} rows had errors`, {
+          description: data.data.errorDetails.slice(0, 3).map((e) => `Row ${e.row}: ${e.message}`).join(' · '),
+          duration: 10000,
+        });
+      }
+    } catch (err) {
+      clearInterval(iv);
+      setPhase('ready');
+      toast.error('Import failed', { description: (err as Error).message });
+    }
   }
 
   async function exportData(t: string) {
-    const res = await fetch(`/api/export/${t}`);
-    const data = await res.json() as { data: { size: string } };
-    toast.success(`${t} exported — ${data.data.size}`);
+    const loading = toast.loading(`Exporting ${t}…`);
+    const res = await apiFetch(`/api/settings/export/${t}`);
+    toast.dismiss(loading);
+    if (!res.ok) { toast.error('Export failed'); return; }
+    const blob = await res.blob();
+    const ext = t === 'backup' ? 'json' : 'csv';
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `pharmaos-${t}-${new Date().toISOString().slice(0, 10)}.${ext}`,
+    });
+    a.click();
+    toast.success(`${t} exported`);
+  }
+
+  const TEMPLATE_HEADERS: Record<string, string[]> = {
+    medicines: ['Medicine Name', 'Generic Name', 'Manufacturer', 'Category', 'Dosage Form', 'Strength', 'Schedule', 'MRP', 'Selling Price', 'HSN Code', 'GST %'],
+    inventory: ['Medicine Name', 'Batch Number', 'Qty', 'Purchase Price', 'MRP', 'Expiry Date (MM/YYYY)', 'Rack Location'],
+    customers: ['Name', 'Phone', 'Email', 'Address', 'City', 'Date of Birth', 'Notes'],
+    vendors: ['Company Name', 'Contact Person', 'Phone', 'Email', 'Address', 'GST Number', 'Payment Terms (days)', 'Credit Limit'],
+  };
+
+  function downloadTemplate() {
+    const headers = TEMPLATE_HEADERS[type];
+    if (!headers) { toast.error('No template for this type'); return; }
+    const sample = type === 'medicines'
+      ? '\r\nParacetamol 650mg,Paracetamol,GSK India,analgesic,tablet,650mg,,25,22,30049099,12'
+      : '';
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(new Blob([headers.join(',') + sample], { type: 'text/csv' })),
+      download: `pharmaos-${type}-template.csv`,
+    });
+    a.click();
+    toast.success('Template downloaded — fill it in Excel, save as CSV, then upload');
   }
 
   function reset() { setFile(null); setPhase('idle'); setProgress(0); setResult(null); }
@@ -414,8 +500,7 @@ function ImportSection() {
                 </p>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="h-7 text-xs shrink-0"
-              onClick={() => toast.success('Template downloaded to Downloads folder')}>
+            <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={downloadTemplate}>
               <Download className="h-3 w-3" /> Download
             </Button>
           </div>
@@ -531,13 +616,18 @@ function ImportSection() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm">Create Full Backup</p>
-              <p className="text-xs text-muted-foreground">All data exported as encrypted .zip (~12 MB)</p>
+              <p className="text-xs text-muted-foreground">SQL dump via pg_dump (or JSON snapshot) saved on the server</p>
             </div>
             <Button variant="outline" size="sm" onClick={async () => {
               const t = toast.loading('Creating backup…');
-              await fetch('/api/backup', { method: 'POST' });
+              const res = await apiFetch('/api/settings/backup', { method: 'POST' });
+              const j = await res.json() as { success: boolean; message?: string; data?: { file: string; size: string; method: string } };
               toast.dismiss(t);
-              toast.success('Backup created — divya-pharmacy-backup.zip');
+              if (res.ok && j.success && j.data) {
+                toast.success(`Backup created — ${j.data.file} (${j.data.size})`, { description: j.message, duration: 8000 });
+              } else {
+                toast.error('Backup failed', { description: j.message });
+              }
             }}>
               <Archive className="h-4 w-4" /> Backup Now
             </Button>
@@ -546,11 +636,8 @@ function ImportSection() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm">Restore from Backup</p>
-              <p className="text-xs text-muted-foreground">Upload a .zip backup to restore all data</p>
+              <p className="text-xs text-muted-foreground">SQL backups restore via <code className="font-data">psql</code> — see DEPLOYMENT.md. Data CSVs restore via Import above.</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => { setType('backup'); reset(); document.querySelector<HTMLElement>('[data-import-trigger]')?.click(); }}>
-              <Upload className="h-4 w-4" /> Restore
-            </Button>
           </div>
         </div>
       </div>
@@ -770,6 +857,28 @@ export function SettingsView() {
                 </button>
               );
             })}
+
+            {/* Admin quick-links */}
+            <div className="mt-4">
+              <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Administration</p>
+              {[
+                { href: '/users',  label: 'User Management',  icon: UserCog },
+                { href: '/roles',  label: 'Roles & Permissions', icon: Shield },
+                { href: '/audit',  label: 'Audit Log',        icon: ClipboardList },
+              ].map(({ href, label, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <span className="text-xs font-semibold flex-1">{label}</span>
+                  <ExternalLink className="h-3 w-3 opacity-40" />
+                </Link>
+              ))}
+            </div>
 
             {/* Info box */}
             <div className="mt-4 rounded-xl bg-muted/50 p-3">

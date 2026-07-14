@@ -51,3 +51,12 @@ storybook-static
 # PWA
 **/public/sw.js
 **/public/workbox-*.js
+
+# API runtime artifacts
+apps/api/logs
+apps/api/backups
+apps/api/uploads
+
+# TypeScript build info
+*.tsbuildinfo
+apps/api/server-run.log

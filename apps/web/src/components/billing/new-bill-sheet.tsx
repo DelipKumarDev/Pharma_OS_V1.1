@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Medicine, Bill } from '@pharmaos/types';
+import { apiFetch } from '@/lib/api';
 
 interface LineItem {
   medicineId: string;
@@ -35,13 +36,14 @@ interface Props {
 }
 
 async function searchMedicines(q: string): Promise<Medicine[]> {
-  const res = await fetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=10`);
+  const res = await apiFetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=10`);
   const json = await res.json() as { success: boolean; data: { data: Medicine[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Medicine[]);
 }
 
 async function createBill(payload: object): Promise<Bill> {
-  const res = await fetch('/api/billing', {
+  const res = await apiFetch('/api/billing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

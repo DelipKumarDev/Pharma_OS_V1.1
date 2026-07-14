@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
   Package, AlertTriangle, CalendarX2, RotateCcw, Plus, Upload, Download,
@@ -25,12 +26,15 @@ import { AddStockSheet } from '@/components/inventory/add-stock-sheet';
 import { AdjustStockDialog } from '@/components/inventory/adjust-stock-dialog';
 import { BatchDetailSheet } from '@/components/inventory/batch-detail-sheet';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function fetchStats(): Promise<InventoryStats> {
-  const r = await fetch('/api/inventory/stats');
-  return ((await r.json()) as { data: InventoryStats }).data;
+  const r = await apiFetch('/api/inventory/stats');
+  const j = await r.json() as { success: boolean; data: InventoryStats };
+  if (!j.success || !j.data) throw new Error('Failed to load inventory stats');
+  return j.data;
 }
 
 async function fetchInventory(search = '', status = 'all', form = 'all'): Promise<InventoryItem[]> {
@@ -38,21 +42,27 @@ async function fetchInventory(search = '', status = 'all', form = 'all'): Promis
   if (search) p.set('search', search);
   if (status !== 'all') p.set('status', status);
   if (form !== 'all') p.set('dosageForm', form);
-  const r = await fetch(`/api/inventory?${p}`);
-  return ((await r.json()) as { data: { data: InventoryItem[] } }).data.data;
+  const r = await apiFetch(`/api/inventory?${p}`);
+  const json = await r.json() as { success: boolean; data: { data: InventoryItem[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as InventoryItem[]);
 }
 
 async function fetchMedicines(search = '', category = 'all'): Promise<Record<string, unknown>[]> {
   const p = new URLSearchParams({ limit: '200' });
   if (search) p.set('search', search);
   if (category !== 'all') p.set('category', category);
-  const r = await fetch(`/api/medicines?${p}`);
-  return ((await r.json()) as { data: { data: Record<string, unknown>[] } }).data.data;
+  const r = await apiFetch(`/api/medicines?${p}`);
+  const json = await r.json() as { success: boolean; data: { data: Record<string, unknown>[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Record<string, unknown>[]);
 }
 
 async function fetchReorder(): Promise<Record<string, unknown>[]> {
-  const r = await fetch('/api/reorder?limit=100');
-  return ((await r.json()) as { data: { data: Record<string, unknown>[] } }).data.data;
+  const r = await apiFetch('/api/reorder?limit=100');
+  const json = await r.json() as { success: boolean; data: { data: Record<string, unknown>[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Record<string, unknown>[]);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -114,7 +124,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         return p + 3 + Math.random() * 8;
       });
     }, 150);
-    const res = await fetch(`/api/import/${type}`, { method: 'POST', body: new FormData() });
+    const res = await apiFetch(`/api/import/${type}`, { method: 'POST', body: new FormData() });
     const data = await res.json() as { data: { imported: number; skipped: number; errors: number } };
     clearInterval(interval);
     setProgress(100);
@@ -277,6 +287,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function StockView() {
+  const router = useRouter();
   const [tab, setTab] = useState('overview');
   const [showImport, setShowImport] = useState(false);
   const [addStockOpen, setAddStockOpen] = useState(false);
@@ -287,6 +298,25 @@ export function StockView() {
   const [formFilter, setFormFilter] = useState('all');
   const [medSearch, setMedSearch] = useState('');
   const qc = useQueryClient();
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const r = await apiFetch(`/api/inventory/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!j.success) throw new Error(j.message ?? 'Update failed');
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['inventory-stats'] });
+      const label = variables.status === 'damaged' ? 'marked as disposed' : 'marked as expired';
+      toast.success(`Batch ${label} successfully`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const { data: stats } = useQuery({ queryKey: ['inventory-stats'], queryFn: fetchStats });
 
@@ -315,22 +345,22 @@ export function StockView() {
   }).sort((a, b) => daysUntilExpiry(a.expiryDate) - daysUntilExpiry(b.expiryDate));
 
   // Overview stats
-  const goodStock = inventory.filter((i) => i.status === 'in_stock').length;
+  const goodStock = inventory.filter((i) => i.status === 'available').length;
   const lowStock = inventory.filter((i) => i.status === 'low_stock').length;
-  const criticalStock = inventory.filter((i) => i.status === 'out_of_stock' || i.status === 'critical').length;
+  const criticalStock = inventory.filter((i) => i.status === 'out_of_stock').length;
 
   // ── Inventory columns ────────────────────────────────────────────────────────
   const inventoryColumns: ColumnDef<InventoryItem>[] = [
     {
       id: 'medicine',
-      accessorFn: (row) => (row.medicine as { name?: string } | undefined)?.name ?? row.medicineName ?? '',
+      accessorFn: (row) => (row.medicine as { name?: string } | undefined)?.name ?? '',
       header: 'Medicine',
       cell: ({ row }) => {
         const item = row.original;
         const med = item.medicine as { name?: string } | undefined;
         return (
           <div>
-            <p className="font-semibold text-sm">{med?.name ?? item.medicineName ?? 'Unknown'}</p>
+            <p className="font-semibold text-sm">{med?.name ?? 'Unknown'}</p>
             <p className="text-xs text-muted-foreground font-mono">{item.batchNumber}</p>
           </div>
         );
@@ -458,7 +488,7 @@ export function StockView() {
   const expiryColumns: ColumnDef<InventoryItem>[] = [
     {
       id: 'medicine',
-      accessorFn: (row) => (row.medicine as { name?: string } | undefined)?.name ?? row.medicineName ?? '',
+      accessorFn: (row) => (row.medicine as { name?: string } | undefined)?.name ?? '',
       header: 'Medicine / Batch',
       cell: ({ row }) => {
         const item = row.original;
@@ -509,9 +539,9 @@ export function StockView() {
             <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => toast.info('Return to vendor initiated')}><RefreshCw className="h-4 w-4" /> Return to Vendor</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.warning('Marked as disposed')}><Trash2 className="h-4 w-4" /> Mark Disposed</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info('Batch marked expired')}><X className="h-4 w-4" /> Mark Expired</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push(`/vendors?ref=return&batchId=${row.original.id}`)}><RefreshCw className="h-4 w-4" /> Return to Vendor</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { if (confirm(`Mark batch ${row.original.batchNumber} as disposed?`)) updateStatusMutation.mutate({ id: row.original.id, status: 'damaged' }); }}><Trash2 className="h-4 w-4" /> Mark Disposed</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => { if (confirm(`Mark batch ${row.original.batchNumber} as expired?`)) updateStatusMutation.mutate({ id: row.original.id, status: 'expired' }); }}><X className="h-4 w-4" /> Mark Expired</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -572,7 +602,7 @@ export function StockView() {
       header: '',
       cell: () => (
         <div className="flex gap-1.5">
-          <Button size="sm" className="h-7 text-xs" onClick={() => toast.success('Purchase order created')}>
+          <Button size="sm" className="h-7 text-xs" onClick={() => router.push('/vendors')}>
             <Plus className="h-3 w-3" /> Create PO
           </Button>
         </div>
@@ -592,7 +622,21 @@ export function StockView() {
           <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>
             <Upload className="h-4 w-4" /> Import
           </Button>
-          <Button variant="outline" size="sm" onClick={() => toast.info('Exporting CSV…')}>
+          <Button variant="outline" size="sm" onClick={() => {
+            if (inventory.length === 0) { toast.warning('No data to export'); return; }
+            const headers = ['Medicine', 'Batch No.', 'Qty', 'Expiry', 'Status', 'MRP', 'Rack'];
+            const rows = inventory.map((i) => {
+              const med = i.medicine as { name?: string } | undefined;
+              return [med?.name ?? '', i.batchNumber, i.availableQuantity, formatDate(i.expiryDate), i.status, i.mrp, i.rackLocation ?? ''].join(',');
+            });
+            const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `stock-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            toast.success(`Exported ${inventory.length} items`);
+          }}>
             <Download className="h-4 w-4" /> Export
           </Button>
           <Button size="sm" onClick={() => setAddStockOpen(true)}>
@@ -631,8 +675,8 @@ export function StockView() {
               { value: 'overview', label: 'Overview', icon: Zap },
               { value: 'catalog', label: 'Medicine Catalog', icon: Pill },
               { value: 'inventory', label: 'Stock Levels', icon: Package },
-              { value: 'expiry', label: 'Expiry Monitor', icon: CalendarX2, badge: stats?.expiringItems },
-              { value: 'reorder', label: 'Reorder Queue', icon: RotateCcw, badge: stats?.lowStockItems },
+              { value: 'expiry', label: 'Expiry Monitor', icon: CalendarX2, badge: stats?.expiringSoonCount },
+              { value: 'reorder', label: 'Reorder Queue', icon: RotateCcw, badge: stats?.lowStockCount },
             ].map((t) => (
               <TabsTrigger
                 key={t.value}
@@ -701,9 +745,9 @@ export function StockView() {
           {stats && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {[
-                { label: 'Total Stock Value', value: formatCurrency(stats.totalValue ?? stats.stockValue ?? 0), icon: Package },
-                { label: 'Total Medicines', value: String(stats.totalMedicines ?? stats.totalItems ?? '—'), icon: Pill },
-                { label: 'Out of Stock', value: String(stats.outOfStockItems ?? 0), icon: AlertTriangle },
+                { label: 'Total Stock Value', value: formatCurrency(stats.inventoryValue), icon: Package },
+                { label: 'Total Medicines', value: String(stats.totalMedicines), icon: Pill },
+                { label: 'Out of Stock', value: String(stats.outOfStockCount), icon: AlertTriangle },
               ].map(({ label, value, icon: Icon }) => (
                 <div key={label} className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
                   <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -818,23 +862,21 @@ export function StockView() {
       {addStockOpen && (
         <AddStockSheet
           open={addStockOpen}
-          onClose={() => setAddStockOpen(false)}
-          onSuccess={() => { setAddStockOpen(false); qc.invalidateQueries({ queryKey: ['inventory'] }); }}
+          onOpenChange={(o) => { if (!o) { setAddStockOpen(false); void qc.invalidateQueries({ queryKey: ['inventory'] }); } }}
         />
       )}
       {adjustItem && (
         <AdjustStockDialog
           item={adjustItem}
           open={!!adjustItem}
-          onClose={() => setAdjustItem(null)}
-          onSuccess={() => { setAdjustItem(null); qc.invalidateQueries({ queryKey: ['inventory'] }); }}
+          onOpenChange={(o) => { if (!o) setAdjustItem(null); }}
         />
       )}
       {batchItem && (
         <BatchDetailSheet
           item={batchItem}
           open={!!batchItem}
-          onClose={() => setBatchItem(null)}
+          onOpenChange={(o) => { if (!o) setBatchItem(null); }}
         />
       )}
     </div>

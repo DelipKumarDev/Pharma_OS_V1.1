@@ -24,20 +24,25 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function fetchStats(): Promise<ReturnStats> {
-  const r = await fetch('/api/returns/stats');
-  return ((await r.json()) as { data: ReturnStats }).data;
+  const r = await apiFetch('/api/returns/stats');
+  const json = await r.json() as { success: boolean; data: ReturnStats };
+  if (!r.ok) throw new Error('Request failed');
+  return json.data ?? ({} as ReturnStats);
 }
 
 async function fetchReturns(type?: string, status?: string): Promise<ReturnRequest[]> {
   const params = new URLSearchParams();
   if (type) params.set('type', type);
   if (status) params.set('status', status);
-  const r = await fetch(`/api/returns${params.size ? '?' + params.toString() : ''}`);
-  return ((await r.json()) as { data: { data: ReturnRequest[] } }).data.data;
+  const r = await apiFetch(`/api/returns${params.size ? '?' + params.toString() : ''}`);
+  const json = await r.json() as { success: boolean; data: { data: ReturnRequest[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as ReturnRequest[]);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -72,7 +77,7 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
 
   const approveMut = useMutation({
     mutationFn: async () => {
-      await fetch(`/api/returns/${ret.id}/approve`, { method: 'PATCH' });
+      await apiFetch(`/api/returns/${ret.id}/approve`, { method: 'PATCH' });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['returns'] });
@@ -84,7 +89,7 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
 
   const processMut = useMutation({
     mutationFn: async () => {
-      await fetch(`/api/returns/${ret.id}/process`, { method: 'PATCH' });
+      await apiFetch(`/api/returns/${ret.id}/process`, { method: 'PATCH' });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['returns'] });
@@ -96,7 +101,7 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
 
   const rejectMut = useMutation({
     mutationFn: async () => {
-      await fetch(`/api/returns/${ret.id}/reject`, {
+      await apiFetch(`/api/returns/${ret.id}/reject`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notes: 'Rejected by pharmacist' }),
       });
@@ -295,7 +300,7 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
           ? { billNumber: billNumber || undefined, customerName, customerPhone: customerPhone || undefined, refundMethod }
           : { vendorName, purchaseInvoiceNumber: invoiceNumber || undefined }),
       };
-      const r = await fetch('/api/returns', {
+      const r = await apiFetch('/api/returns', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -419,7 +424,7 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Refund Method</p>
               <div className="grid grid-cols-4 gap-1.5">
                 {[['cash', 'Cash'], ['upi', 'UPI'], ['credit_note', 'Credit'], ['original_payment', 'Original']].map(([val, label]) => (
-                  <button key={val} onClick={() => setRefundMethod(val)}
+                  <button key={val} onClick={() => setRefundMethod(val ?? '')}
                     className={cn(
                       'rounded-lg py-2 text-xs font-semibold border transition-all',
                       refundMethod === val ? 'bg-primary text-white border-primary' : 'border-border bg-background text-muted-foreground hover:bg-muted'

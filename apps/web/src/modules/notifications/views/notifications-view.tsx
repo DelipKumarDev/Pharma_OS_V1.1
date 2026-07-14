@@ -13,28 +13,31 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api';
 
 async function fetchNotificationStats(): Promise<NotificationStats> {
-  const res = await fetch('/api/notifications/stats');
+  const res = await apiFetch('/api/notifications/stats');
   const json = await res.json() as { success: boolean; data: NotificationStats };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ({} as NotificationStats);
 }
 
 async function fetchNotifications(category?: string, unreadOnly?: boolean): Promise<Notification[]> {
   const params = new URLSearchParams();
   if (category && category !== 'all') params.set('category', category);
   if (unreadOnly) params.set('unread', 'true');
-  const res = await fetch(`/api/notifications?${params}`);
+  const res = await apiFetch(`/api/notifications?${params}`);
   const json = await res.json() as { success: boolean; data: { data: Notification[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Notification[]);
 }
 
 async function markRead(id: string): Promise<void> {
-  await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+  await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
 }
 
 async function markAllRead(): Promise<void> {
-  await fetch('/api/notifications/mark-all-read', { method: 'PATCH' });
+  await apiFetch('/api/notifications/mark-all-read', { method: 'PATCH' });
 }
 
 const CATEGORY_CONFIG = {

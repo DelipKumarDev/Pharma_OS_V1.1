@@ -222,7 +222,7 @@ export function LoginForm() {
         return;
       }
       setAuth(json.data.user, json.data.tokens);
-      toast.success(`Signed in as ${email.split('@')[0].replace(/[._]/g, ' ')}`);
+      toast.success(`Signed in as ${(email.split('@')[0] ?? email).replace(/[._]/g, ' ')}`);
       router.push('/dashboard');
     } catch {
       toast.error('Network error. Please try again.');

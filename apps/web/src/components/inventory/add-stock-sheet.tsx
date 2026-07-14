@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Medicine, InventoryItem } from '@pharmaos/types';
+import { apiFetch } from '@/lib/api';
 
 const schema = z.object({
   medicineId: z.string().min(1, 'Select a medicine'),
@@ -34,13 +35,14 @@ interface Props {
 }
 
 async function fetchMedicinesSearch(q: string): Promise<Medicine[]> {
-  const res = await fetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=20`);
+  const res = await apiFetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=20`);
   const json = await res.json() as { success: boolean; data: { data: Medicine[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Medicine[]);
 }
 
 async function addStock(data: FormValues): Promise<InventoryItem> {
-  const res = await fetch('/api/inventory', {
+  const res = await apiFetch('/api/inventory', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

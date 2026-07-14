@@ -39,6 +39,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function enableMocking() {
+      // Skip MSW when real backend is configured
+      if (process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_USE_REAL_API === 'true') {
+        setMswReady(true);
+        return;
+      }
       if (process.env.NODE_ENV !== 'development') {
         setMswReady(true);
         return;

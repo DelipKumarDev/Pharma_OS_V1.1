@@ -17,11 +17,13 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
+import { apiFetch } from '@/lib/api';
 
 async function fetchUsers(): Promise<User[]> {
-  const res = await fetch('/api/users');
+  const res = await apiFetch('/api/users');
   const json = await res.json() as { success: boolean; data: { data: User[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as User[]);
 }
 
 function exportCSV(data: User[]) {
@@ -55,7 +57,7 @@ export function UsersView() {
 
   const lockMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      await fetch(`/api/users/${id}`, {
+      await apiFetch(`/api/users/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),

@@ -16,11 +16,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api';
 
 async function fetchAuditStats(): Promise<AuditStats> {
-  const res = await fetch('/api/audit/stats');
+  const res = await apiFetch('/api/audit/stats');
   const json = await res.json() as { success: boolean; data: AuditStats };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ({} as AuditStats);
 }
 
 async function fetchAuditLogs(filters: { module?: string; action?: string; severity?: string; search?: string; page?: number }): Promise<{ data: AuditLog[]; total: number }> {
@@ -31,15 +33,17 @@ async function fetchAuditLogs(filters: { module?: string; action?: string; sever
   if (filters.search) params.set('search', filters.search);
   params.set('page', String(filters.page ?? 1));
   params.set('limit', '20');
-  const res = await fetch(`/api/audit?${params}`);
+  const res = await apiFetch(`/api/audit?${params}`);
   const json = await res.json() as { success: boolean; data: { data: AuditLog[]; total: number } };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? { data: [], total: 0 };
 }
 
 async function fetchSessions(): Promise<UserSession[]> {
-  const res = await fetch('/api/audit/sessions');
+  const res = await apiFetch('/api/audit/sessions');
   const json = await res.json() as { success: boolean; data: { data: UserSession[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as UserSession[]);
 }
 
 const MODULE_ICONS: Record<string, React.ElementType> = {

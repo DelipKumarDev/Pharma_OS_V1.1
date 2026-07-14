@@ -137,7 +137,7 @@ export function MedicinesView() {
             <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => toast.info(`Viewing: ${row.original.name}`)}>
+            <DropdownMenuItem onClick={() => setEditMedicine(row.original)}>
               <Eye className="h-4 w-4" /> View Details
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setEditMedicine(row.original)}>

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Role, User } from '@pharmaos/types';
+import { apiFetch } from '@/lib/api';
 
 const schema = z.object({
   name: z.string().min(2, 'Name is required'),
@@ -29,13 +30,14 @@ interface Props {
 }
 
 async function fetchRoles(): Promise<Role[]> {
-  const res = await fetch('/api/roles');
+  const res = await apiFetch('/api/roles');
   const json = await res.json() as { success: boolean; data: { data: Role[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Role[]);
 }
 
 async function inviteUser(data: FormValues): Promise<User> {
-  const res = await fetch('/api/users', {
+  const res = await apiFetch('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

@@ -13,11 +13,13 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 async function fetchInventory(): Promise<InventoryItem[]> {
-  const res = await fetch('/api/inventory?limit=100');
+  const res = await apiFetch('/api/inventory?limit=100');
   const json = await res.json() as { success: boolean; data: { data: InventoryItem[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as InventoryItem[]);
 }
 
 function exportExpiryCSV(data: InventoryItem[], label: string) {
@@ -54,7 +56,7 @@ export function ExpiryView() {
 
   const disposeMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/inventory/${id}/adjust`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adjustment: -(disposeTarget?.availableQuantity ?? 0), reason: 'Expired units disposed' }) });
+      await apiFetch(`/api/inventory/${id}/adjust`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adjustment: -(disposeTarget?.availableQuantity ?? 0), reason: 'Expired units disposed' }) });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Batch marked as disposed', { description: 'Disposal certificate generated. Audit log updated.' }); setDisposeTarget(null); },
   });

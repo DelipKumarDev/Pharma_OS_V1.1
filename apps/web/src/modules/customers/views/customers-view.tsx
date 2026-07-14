@@ -24,30 +24,34 @@ import { cn } from '@/lib/utils';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { apiFetch } from '@/lib/api';
 
 async function fetchCustomerStats(): Promise<CustomerStats> {
-  const res = await fetch('/api/customers/stats');
+  const res = await apiFetch('/api/customers/stats');
   const json = await res.json() as { success: boolean; data: CustomerStats };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ({} as CustomerStats);
 }
 
 async function fetchCustomers(search?: string, type?: string): Promise<Customer[]> {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
   if (type && type !== 'all') params.set('type', type);
-  const res = await fetch(`/api/customers?${params}`);
+  const res = await apiFetch(`/api/customers?${params}`);
   const json = await res.json() as { success: boolean; data: { data: Customer[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Customer[]);
 }
 
 async function fetchCustomerPurchases(id: string): Promise<CustomerPurchase[]> {
-  const res = await fetch(`/api/customers/${id}/purchases`);
+  const res = await apiFetch(`/api/customers/${id}/purchases`);
   const json = await res.json() as { success: boolean; data: { data: CustomerPurchase[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as CustomerPurchase[]);
 }
 
 async function createCustomer(data: Record<string, unknown>): Promise<Customer> {
-  const res = await fetch('/api/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const res = await apiFetch('/api/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const json = await res.json() as { success: boolean; data: Customer; message?: string };
   if (!json.success) throw new Error(json.message ?? 'Failed');
   return json.data;
@@ -271,6 +275,7 @@ export function CustomersView() {
   const [addOpen, setAddOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
@@ -389,11 +394,18 @@ export function CustomersView() {
             <DropdownMenuItem onClick={() => { setSelectedCustomer(row.original); setDetailOpen(true); }}>
               <Eye className="h-4 w-4" /> View Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info('WhatsApp refill reminder — coming soon')}>
+            <DropdownMenuItem onClick={() => {
+              const c = row.original;
+              if (!c.phone) { toast.error('No phone number on file for this customer'); return; }
+              const digits = c.phone.replace(/\D/g, '');
+              const full = digits.length === 10 ? `91${digits}` : digits;
+              const msg = encodeURIComponent(`Dear ${c.name.split(' ')[0]},\n\nThis is a reminder from *Pharmacy* for your medicine refill. Please visit us or call to refill your prescription.\n\nThank you! 🙏`);
+              window.open(`https://wa.me/${full}?text=${msg}`, '_blank');
+            }}>
               <Phone className="h-4 w-4" /> Send Reminder
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => toast.info('Record credit payment — coming soon')}>
+            <DropdownMenuItem onClick={() => setPaymentCustomer(row.original)}>
               <Wallet className="h-4 w-4" /> Record Payment
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -471,6 +483,82 @@ export function CustomersView() {
 
       <AddCustomerDialog open={addOpen} onOpenChange={setAddOpen} />
       <CustomerDetailSheet customer={selectedCustomer} open={detailOpen} onOpenChange={setDetailOpen} />
+
+      {/* Credit payment dialog */}
+      <Dialog open={!!paymentCustomer} onOpenChange={(o) => { if (!o) setPaymentCustomer(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Record Credit Payment</DialogTitle>
+          </DialogHeader>
+          {paymentCustomer && (
+            <CreditPaymentForm
+              customer={paymentCustomer}
+              onSuccess={() => setPaymentCustomer(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function CreditPaymentForm({ customer, onSuccess }: { customer: Customer; onSuccess: () => void }) {
+  const qc = useQueryClient();
+  const [amount, setAmount] = useState('');
+  const [payMode, setPayMode] = useState('cash');
+  const [ref, setRef] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/customers/${customer.id}/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: Number(amount), paymentMode: payMode, referenceNumber: ref || undefined, paymentDate: new Date().toISOString() }),
+      });
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!j.success) throw new Error(j.message ?? 'Failed');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      qc.invalidateQueries({ queryKey: ['customer-stats'] });
+      toast.success('Credit payment recorded');
+      onSuccess();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
+        <p className="font-medium">{customer.name}</p>
+        <p className="text-xs text-warning-700">Credit balance: {formatCurrency(customer.creditBalance ?? 0)}</p>
+      </div>
+      <div className="space-y-1">
+        <Label>Amount Received (₹) <span className="text-destructive">*</span></Label>
+        <Input type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <Label>Payment Mode</Label>
+        <Select value={payMode} onValueChange={setPayMode}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cash">Cash</SelectItem>
+            <SelectItem value="upi">UPI</SelectItem>
+            <SelectItem value="neft">NEFT / Bank Transfer</SelectItem>
+            <SelectItem value="cheque">Cheque</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label>Reference No.</Label>
+        <Input placeholder="Optional" value={ref} onChange={(e) => setRef(e.target.value)} />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" type="button" onClick={onSuccess}>Cancel</Button>
+        <Button disabled={!amount || Number(amount) <= 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+          {mutation.isPending ? 'Saving…' : 'Record Payment'}
+        </Button>
+      </DialogFooter>
     </div>
   );
 }

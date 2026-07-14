@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { Bell, Search, Moon, Sun, ChevronDown } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Bell, Search, Moon, Sun, ChevronDown, User, Lock, LogOut, Settings, Pill, Receipt, Users, X } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -18,21 +18,181 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useRouter } from 'next/navigation';
 import { useSidebarStore } from '@/store/sidebar-store';
+import { useAuthStore } from '@/store/auth-store';
 import { getInitials } from '@/lib/utils';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api';
 
-const MOCK_USER = {
-  name: 'Rahul Sharma',
-  email: 'rahul@divyapharmacy.com',
-  role: 'Pharma Admin',
-  tenantName: 'Divya Pharmacy',
-  avatar: '',
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  category: string;
+  priority: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+async function fetchNotifications(): Promise<{ data: Notification[]; total: number }> {
+  const res = await apiFetch('/api/notifications?unread=true&limit=5');
+  if (!res.ok) return { data: [], total: 0 };
+  const json = await res.json();
+  return json.data ?? { data: [], total: 0 };
+}
+
+async function markAllRead() {
+  await apiFetch('/api/notifications/mark-all-read', { method: 'PATCH' });
+}
+
+async function logoutApi(refreshToken: string) {
+  await apiFetch('/api/auth/logout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+}
+
+// ─── Global Search ────────────────────────────────────────────────────────────
+
+interface SearchResult {
+  id: string;
+  type: 'medicine' | 'customer' | 'bill' | 'vendor';
+  title: string;
+  subtitle: string;
+  href: string;
+}
+
+const TYPE_ICON: Record<string, React.ElementType> = {
+  medicine: Pill,
+  customer: Users,
+  bill: Receipt,
+  vendor: Users,
 };
 
-const MOCK_NOTIFICATIONS = [
-  { id: '1', title: '12 medicines expiring in 30 days', type: 'warning', time: '2m ago' },
-  { id: '2', title: 'Stock low: Paracetamol 500mg', type: 'error', time: '15m ago' },
-  { id: '3', title: 'Daily backup completed', type: 'success', time: '1h ago' },
-];
+const TYPE_LABEL: Record<string, string> = {
+  medicine: 'Medicine',
+  customer: 'Customer',
+  bill: 'Bill',
+  vendor: 'Vendor',
+};
+
+function GlobalSearch() {
+  const router = useRouter();
+  const { tokens } = useAuthStore();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const { data: results = [], isFetching } = useQuery<SearchResult[]>({
+    queryKey: ['global-search', query],
+    queryFn: async () => {
+      if (query.length < 2) return [];
+      const r = await apiFetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
+      if (!r.ok) return [];
+      const j = await r.json() as { data: SearchResult[] };
+      return j.data ?? [];
+    },
+    enabled: query.length >= 2 && !!tokens?.accessToken,
+    staleTime: 10_000,
+  });
+
+  const focus = useCallback(() => {
+    inputRef.current?.focus();
+    setOpen(true);
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        focus();
+      }
+      if (e.key === 'Escape') { setOpen(false); setQuery(''); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focus]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  function navigate(href: string) {
+    router.push(href);
+    setOpen(false);
+    setQuery('');
+  }
+
+  return (
+    <div ref={containerRef} className="relative hidden max-w-sm flex-1 md:flex">
+      <div className="relative w-full">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search medicines, bills, patients…"
+          className="h-8 w-full rounded-lg border border-input bg-muted/50 pl-8 pr-14 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        {query ? (
+          <button
+            onClick={() => { setQuery(''); inputRef.current?.focus(); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium opacity-70">
+            ⌘K
+          </kbd>
+        )}
+      </div>
+
+      {open && query.length >= 2 && (
+        <div className="absolute left-0 right-0 top-10 z-50 rounded-xl border border-border bg-card shadow-xl">
+          {isFetching ? (
+            <div className="px-4 py-3 text-xs text-muted-foreground">Searching…</div>
+          ) : results.length === 0 ? (
+            <div className="px-4 py-3 text-xs text-muted-foreground">No results for "{query}"</div>
+          ) : (
+            <ul className="max-h-72 overflow-y-auto py-1">
+              {results.map((r) => {
+                const Icon = TYPE_ICON[r.type] ?? Search;
+                return (
+                  <li key={r.id}>
+                    <button
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/60 transition-colors"
+                      onClick={() => navigate(r.href)}
+                    >
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted">
+                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium text-foreground">{r.title}</p>
+                        <p className="truncate text-2xs text-muted-foreground">{r.subtitle}</p>
+                      </div>
+                      <Badge variant="muted" className="text-2xs shrink-0">{TYPE_LABEL[r.type]}</Badge>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface HeaderProps {
   breadcrumb?: React.ReactNode;
@@ -42,6 +202,41 @@ export function Header({ breadcrumb }: HeaderProps) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { collapsed } = useSidebarStore();
+  const { user, tokens, clearAuth } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  const { data: notifData } = useQuery({
+    queryKey: ['notifications', 'header'],
+    queryFn: () => fetchNotifications(),
+    enabled: !!tokens?.accessToken,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const markReadMutation = useMutation({
+    mutationFn: () => markAllRead(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      toast.success('All notifications marked as read');
+    },
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: () => logoutApi(tokens?.refreshToken ?? ''),
+    onSettled: () => {
+      clearAuth();
+      queryClient.clear();
+      router.push('/login');
+    },
+  });
+
+  const notifications = notifData?.data ?? [];
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  const displayName = user?.name ?? 'User';
+  const displayEmail = user?.email ?? '';
+  const displayRole = user?.roles?.[0] ?? 'Staff';
+  const tenantName = user?.tenantName ?? 'PharmaOS';
 
   return (
     <header
@@ -56,23 +251,14 @@ export function Header({ breadcrumb }: HeaderProps) {
         {/* Breadcrumb */}
         {breadcrumb && <div className="hidden md:flex">{breadcrumb}</div>}
 
-        {/* Search */}
-        <div className="relative hidden max-w-sm flex-1 md:flex">
-          <Input
-            placeholder="Search medicines, bills, patients…"
-            startIcon={<Search />}
-            className="h-8 bg-muted/50 pl-8 text-xs"
-          />
-          <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 select-none items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium opacity-70 sm:flex">
-            ⌘K
-          </kbd>
-        </div>
+        {/* Global Search */}
+        <GlobalSearch />
 
         <div className="ml-auto flex items-center gap-1.5">
           {/* Tenant chip */}
           <div className="hidden items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2.5 py-1 md:flex">
             <div className="h-2 w-2 rounded-full bg-success" />
-            <span className="text-xs font-medium text-foreground">{MOCK_USER.tenantName}</span>
+            <span className="text-xs font-medium text-foreground">{tenantName}</span>
           </div>
 
           {/* Theme toggle */}
@@ -91,37 +277,60 @@ export function Header({ breadcrumb }: HeaderProps) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon-sm" className="relative" aria-label="Notifications">
                 <Bell className="h-4 w-4" />
-                <Badge className="absolute -right-0.5 -top-0.5 h-4 min-w-4 px-1 text-2xs">
-                  {MOCK_NOTIFICATIONS.length}
-                </Badge>
+                {unreadCount > 0 && (
+                  <Badge className="absolute -right-0.5 -top-0.5 h-4 min-w-4 px-1 text-2xs">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Badge>
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80">
               <DropdownMenuLabel className="flex items-center justify-between">
                 <span>Notifications</span>
-                <Button variant="ghost" size="sm" className="h-auto p-0 text-xs text-primary">
-                  Mark all read
-                </Button>
+                {unreadCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto p-0 text-xs text-primary"
+                    onClick={() => markReadMutation.mutate()}
+                    disabled={markReadMutation.isPending}
+                  >
+                    Mark all read
+                  </Button>
+                )}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {MOCK_NOTIFICATIONS.map((n) => (
-                <DropdownMenuItem key={n.id} className="flex-col items-start gap-0.5 py-3">
-                  <div className="flex w-full items-start gap-2">
-                    <div
-                      className={cn(
-                        'mt-1 h-2 w-2 shrink-0 rounded-full',
-                        n.type === 'warning' && 'bg-warning',
-                        n.type === 'error' && 'bg-destructive',
-                        n.type === 'success' && 'bg-success'
-                      )}
-                    />
-                    <p className="flex-1 text-sm leading-snug">{n.title}</p>
-                  </div>
-                  <span className="pl-4 text-xs text-muted-foreground">{n.time}</span>
-                </DropdownMenuItem>
-              ))}
+              {notifications.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  No unread notifications
+                </div>
+              ) : (
+                notifications.map((n) => (
+                  <DropdownMenuItem
+                    key={n.id}
+                    className="flex-col items-start gap-0.5 py-3"
+                    onClick={() => router.push('/notifications')}
+                  >
+                    <div className="flex w-full items-start gap-2">
+                      <div
+                        className={cn(
+                          'mt-1 h-2 w-2 shrink-0 rounded-full',
+                          n.priority === 'warning' && 'bg-warning',
+                          n.priority === 'critical' && 'bg-destructive',
+                          n.priority === 'info' && 'bg-success'
+                        )}
+                      />
+                      <p className="flex-1 text-sm leading-snug">{n.title}</p>
+                    </div>
+                    <span className="pl-4 text-xs text-muted-foreground">{n.message}</span>
+                  </DropdownMenuItem>
+                ))
+              )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="justify-center text-sm text-primary" onClick={() => router.push('/notifications')}>
+              <DropdownMenuItem
+                className="justify-center text-sm text-primary"
+                onClick={() => router.push('/notifications')}
+              >
                 View all notifications
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -132,27 +341,43 @@ export function Header({ breadcrumb }: HeaderProps) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="gap-2 px-2">
                 <Avatar className="h-7 w-7">
-                  <AvatarImage src={MOCK_USER.avatar} alt={MOCK_USER.name} />
-                  <AvatarFallback className="text-xs">{getInitials(MOCK_USER.name)}</AvatarFallback>
+                  <AvatarImage src={user?.avatar} alt={displayName} />
+                  <AvatarFallback className="text-xs">{getInitials(displayName)}</AvatarFallback>
                 </Avatar>
                 <div className="hidden text-left md:block">
-                  <p className="text-xs font-medium leading-none">{MOCK_USER.name}</p>
-                  <p className="text-2xs text-muted-foreground">{MOCK_USER.role}</p>
+                  <p className="text-xs font-medium leading-none">{displayName}</p>
+                  <p className="text-2xs text-muted-foreground capitalize">{displayRole.replace(/_/g, ' ')}</p>
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
-                <p className="font-medium">{MOCK_USER.name}</p>
-                <p className="text-xs font-normal text-muted-foreground">{MOCK_USER.email}</p>
+                <p className="font-medium">{displayName}</p>
+                <p className="text-xs font-normal text-muted-foreground">{displayEmail}</p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>Profile settings</DropdownMenuItem>
-              <DropdownMenuItem>Change password</DropdownMenuItem>
-              <DropdownMenuItem>Preferences</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/settings?tab=profile')}>
+                <User className="mr-2 h-4 w-4" />
+                Profile settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/settings?tab=security')}>
+                <Lock className="mr-2 h-4 w-4" />
+                Change password
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push('/settings')}>
+                <Settings className="mr-2 h-4 w-4" />
+                Preferences
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem destructive>Sign out</DropdownMenuItem>
+              <DropdownMenuItem
+                destructive
+                onClick={() => logoutMutation.mutate()}
+                disabled={logoutMutation.isPending}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                {logoutMutation.isPending ? 'Signing out…' : 'Sign out'}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

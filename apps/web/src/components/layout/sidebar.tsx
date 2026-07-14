@@ -2,16 +2,21 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Package, Receipt, FileText, Users, BarChart3,
-  Settings2, ChevronLeft, ChevronRight, LogOut, HelpCircle, Zap,
+  Settings2, ChevronLeft, ChevronRight, LogOut, HelpCircle, Zap, Pill,
+  RotateCcw, RefreshCw, CalendarX2, UserCog, Shield, ClipboardList, ShieldAlert,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { useSidebarStore } from '@/store/sidebar-store';
+import { useAuthStore } from '@/store/auth-store';
+import { getInitials } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api';
 
 /* ── Pharmacy cross + leaf logo ── */
 function PharmacyLogoIcon() {
@@ -80,16 +85,46 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard',         href: '/dashboard',    icon: LayoutDashboard },
   { label: 'Billing',           href: '/billing',      icon: Receipt },
-  { label: 'Prescriptions',     href: '/prescriptions', icon: FileText,  badge: 3,  badgeVariant: 'warning' },
-  { label: 'Stock & Inventory', href: '/stock',        icon: Package,   badge: 18, badgeVariant: 'destructive' },
+  { label: 'Returns',           href: '/returns',      icon: RotateCcw },
+  { label: 'Prescriptions',     href: '/prescriptions', icon: FileText },
+  { label: 'Stock & Inventory', href: '/stock',        icon: Package },
+  { label: 'Medicine Master',   href: '/medicines',    icon: Pill },
+  { label: 'Reorder Queue',     href: '/reorder',      icon: RefreshCw },
+  { label: 'Expiry Monitor',    href: '/expiry',       icon: CalendarX2 },
+  { label: 'Schedule Register', href: '/schedule-register', icon: ShieldAlert },
   { label: 'Contacts',          href: '/contacts',     icon: Users },
   { label: 'Reports',           href: '/reports',      icon: BarChart3 },
   { label: 'Settings',          href: '/settings',     icon: Settings2 },
 ];
 
+const ADMIN_ITEMS: NavItem[] = [
+  { label: 'Users',     href: '/users',  icon: UserCog },
+  { label: 'Roles',     href: '/roles',  icon: Shield },
+  { label: 'Audit Log', href: '/audit',  icon: ClipboardList },
+];
+
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { collapsed, toggle } = useSidebarStore();
+  const { user, tokens, clearAuth } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  async function handleSignOut() {
+    try {
+      if (tokens?.accessToken && tokens?.refreshToken) {
+        await apiFetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+        });
+      }
+    } finally {
+      clearAuth();
+      queryClient.clear();
+      router.push('/login');
+    }
+  }
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -147,6 +182,18 @@ export function Sidebar() {
               {NAV_ITEMS.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} collapsed={collapsed} />
               ))}
+
+              {/* Administration section */}
+              {!collapsed ? (
+                <p className="mt-4 mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/35">
+                  Administration
+                </p>
+              ) : (
+                <div className="my-2 mx-1 border-t border-sidebar-border/50" />
+              )}
+              {ADMIN_ITEMS.map((item) => (
+                <NavLink key={item.href} item={item} pathname={pathname} collapsed={collapsed} />
+              ))}
             </nav>
 
             {/* Quick Bill tip */}
@@ -182,10 +229,12 @@ export function Sidebar() {
               collapsed={collapsed}
             />
             <button
+              onClick={handleSignOut}
               className={cn(
                 'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-sidebar-foreground/55 transition-all hover:bg-sidebar-accent hover:text-sidebar-foreground',
                 collapsed && 'justify-center px-2'
               )}
+              aria-label="Sign out"
             >
               <LogOut className="h-4 w-4 shrink-0" />
               {!collapsed && <span>Sign out</span>}
@@ -197,11 +246,11 @@ export function Sidebar() {
             <div className="border-t border-sidebar-border/60 px-3 pb-3 pt-2">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-xs font-bold text-white">
-                  RS
+                  {getInitials(user?.name ?? 'U')}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-sidebar-foreground truncate">Rahul Sharma</p>
-                  <p className="text-[10px] text-sidebar-foreground/45 truncate">Pharma Admin</p>
+                  <p className="text-xs font-semibold text-sidebar-foreground truncate">{user?.name ?? 'User'}</p>
+                  <p className="text-[10px] text-sidebar-foreground/45 truncate capitalize">{(user?.roles?.[0] ?? 'Staff').replace(/_/g, ' ')}</p>
                 </div>
                 <span className="h-2 w-2 rounded-full bg-success shadow-[0_0_5px_#22c55e] shrink-0" />
               </div>

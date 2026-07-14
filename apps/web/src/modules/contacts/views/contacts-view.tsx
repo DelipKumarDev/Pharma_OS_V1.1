@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
@@ -17,17 +18,22 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function fetchCustomers(): Promise<Customer[]> {
-  const r = await fetch('/api/customers?limit=200');
-  return ((await r.json()) as { data: { data: Customer[] } }).data.data;
+  const r = await apiFetch('/api/customers?limit=200');
+  const j = await r.json() as { success: boolean; data: { data: Customer[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return j.data?.data ?? ([] as Customer[]);
 }
 
 async function fetchVendors(): Promise<Vendor[]> {
-  const r = await fetch('/api/vendors?limit=200');
-  return ((await r.json()) as { data: { data: Vendor[] } }).data.data;
+  const r = await apiFetch('/api/vendors?limit=200');
+  const j = await r.json() as { success: boolean; data: { data: Vendor[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return j.data?.data ?? ([] as Vendor[]);
 }
 
 interface RefillReminder {
@@ -43,12 +49,14 @@ interface RefillData {
 }
 
 async function fetchRefills(): Promise<RefillData> {
-  const r = await fetch('/api/refills');
-  return ((await r.json()) as { data: RefillData }).data;
+  const r = await apiFetch('/api/refills');
+  const j = await r.json() as { success: boolean; data: RefillData };
+  if (!r.ok) throw new Error('Request failed');
+  return j.data ?? ({} as RefillData);
 }
 
 async function sendReminder(id: string): Promise<void> {
-  await fetch(`/api/refills/${id}/remind`, { method: 'POST' });
+  await apiFetch(`/api/refills/${id}/remind`, { method: 'POST' });
 }
 
 // ─── Refill Reminders tab ─────────────────────────────────────────────────────
@@ -261,6 +269,7 @@ const VENDOR_STATUS: Record<string, { label: string; variant: 'success' | 'muted
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function ContactsView() {
+  const router = useRouter();
   const [tab, setTab] = useState<'customers' | 'vendors' | 'refills'>('customers');
 
   const { data: customers = [], isLoading: custLoading } = useQuery({
@@ -273,9 +282,9 @@ export function ContactsView() {
     queryFn: fetchVendors,
   });
 
-  const activeCustomers = customers.filter((c) => c.status === 'active' || c.status === 'vip').length;
+  const activeCustomers = customers.filter((c) => c.status === 'active').length;
   const activeVendors = vendors.filter((v) => v.status === 'active').length;
-  const totalOutstanding = vendors.reduce((s, v) => s + ((v as Record<string, number>).outstandingAmount ?? 0), 0);
+  const totalOutstanding = vendors.reduce((s, v) => s + ((v as unknown as Record<string, number>).outstandingAmount ?? 0), 0);
 
   const customerColumns: ColumnDef<Customer>[] = [
     {
@@ -301,7 +310,7 @@ export function ContactsView() {
       accessorKey: 'totalPurchases',
       header: ({ column }) => <SortableHeader column={column}>Total Purchases</SortableHeader>,
       cell: ({ row }) => {
-        const v = (row.original as Record<string, number>).totalPurchases;
+        const v = (row.original as unknown as Record<string, number>).totalPurchases;
         return <span className="font-semibold text-sm">{v !== undefined ? formatCurrency(v) : '—'}</span>;
       },
     },
@@ -309,7 +318,7 @@ export function ContactsView() {
       accessorKey: 'lastVisit',
       header: ({ column }) => <SortableHeader column={column}>Last Visit</SortableHeader>,
       cell: ({ row }) => {
-        const v = (row.original as Record<string, string>).lastVisit;
+        const v = (row.original as unknown as Record<string, string>).lastVisit;
         return <span className="text-xs text-muted-foreground">{v ? formatDate(v) : '—'}</span>;
       },
     },
@@ -317,7 +326,7 @@ export function ContactsView() {
       accessorKey: 'loyaltyPoints',
       header: 'Loyalty',
       cell: ({ row }) => {
-        const pts = (row.original as Record<string, number>).loyaltyPoints ?? 0;
+        const pts = (row.original as unknown as Record<string, number>).loyaltyPoints ?? 0;
         return pts > 0 ? (
           <div className="flex items-center gap-1 text-xs text-warning-600 font-semibold">
             <Star className="h-3 w-3 fill-warning-400 text-warning-400" />
@@ -330,8 +339,8 @@ export function ContactsView() {
       accessorKey: 'status',
       header: 'Status',
       cell: ({ row }) => {
-        const cfg = CUST_STATUS[row.original.status ?? 'active'] ?? CUST_STATUS.active;
-        return <Badge variant={cfg.variant} dot className="text-xs">{cfg.label}</Badge>;
+        const cfg = CUST_STATUS[row.original.status ?? 'active'] ?? CUST_STATUS['active']!;
+        return <Badge variant={cfg!.variant} dot className="text-xs">{cfg!.label}</Badge>;
       },
     },
     {
@@ -386,7 +395,7 @@ export function ContactsView() {
       accessorKey: 'city',
       header: 'Location',
       cell: ({ row }) => {
-        const city = (row.original as Record<string, string>).city;
+        const city = (row.original as unknown as Record<string, string>).city;
         return city ? (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />{city}
@@ -398,7 +407,7 @@ export function ContactsView() {
       id: 'outstanding',
       header: ({ column }) => <SortableHeader column={column}>Outstanding</SortableHeader>,
       cell: ({ row }) => {
-        const amt = (row.original as Record<string, number>).outstandingAmount ?? 0;
+        const amt = (row.original as unknown as Record<string, number>).outstandingAmount ?? 0;
         return (
           <span className={cn('text-sm font-semibold tabular-nums', amt > 0 ? 'text-destructive' : 'text-muted-foreground')}>
             {amt > 0 ? formatCurrency(amt) : '—'}
@@ -410,7 +419,7 @@ export function ContactsView() {
       id: 'paymentTerms',
       header: 'Credit Days',
       cell: ({ row }) => {
-        const days = (row.original as Record<string, number>).paymentTerms ?? 0;
+        const days = (row.original as unknown as Record<string, number>).paymentTerms ?? 0;
         return <span className="text-xs font-medium">{days > 0 ? `${days} days` : 'Cash'}</span>;
       },
     },
@@ -418,8 +427,8 @@ export function ContactsView() {
       accessorKey: 'status',
       header: 'Status',
       cell: ({ row }) => {
-        const cfg = VENDOR_STATUS[(row.original as Record<string, string>).status ?? 'active'] ?? VENDOR_STATUS.active;
-        return <Badge variant={cfg.variant} dot className="text-xs">{cfg.label}</Badge>;
+        const cfg = VENDOR_STATUS[(row.original as unknown as Record<string, string>).status ?? 'active'] ?? VENDOR_STATUS['active']!;
+        return <Badge variant={cfg!.variant} dot className="text-xs">{cfg!.label}</Badge>;
       },
     },
     {
@@ -449,7 +458,7 @@ export function ContactsView() {
           <h1 className="text-2xl font-bold tracking-tight">Contacts</h1>
           <p className="text-sm text-muted-foreground">Manage customers and suppliers in one place</p>
         </div>
-        <Button size="sm" onClick={() => toast.info(`Add ${tab === 'customers' ? 'customer' : 'vendor'} — coming soon`)}>
+        <Button size="sm" onClick={() => router.push(tab === 'customers' ? '/customers' : '/vendors')}>
           <Plus className="h-4 w-4" />
           {tab === 'customers' ? 'Add Customer' : 'Add Vendor'}
         </Button>

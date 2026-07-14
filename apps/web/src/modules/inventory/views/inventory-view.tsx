@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
@@ -25,6 +26,7 @@ import { AdjustStockDialog } from '@/components/inventory/adjust-stock-dialog';
 import { BatchDetailSheet } from '@/components/inventory/batch-detail-sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 const CATEGORY_TABS = [
   { label: 'All', value: 'all' },
@@ -40,9 +42,10 @@ const CATEGORY_TABS = [
 const RECENT_SEARCHES = ['Paracetamol 650', 'Crocin 650', 'Augmentin 625'];
 
 async function fetchStats(): Promise<InventoryStats> {
-  const res = await fetch('/api/inventory/stats');
+  const res = await apiFetch('/api/inventory/stats');
   const json = await res.json() as { success: boolean; data: InventoryStats };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ({} as InventoryStats);
 }
 
 async function fetchInventory(params: { search: string; status: string; category: string }): Promise<InventoryItem[]> {
@@ -55,15 +58,17 @@ async function fetchInventory(params: { search: string; status: string; category
     if (tab?.isCategory) p.set('category', params.category);
     else p.set('dosageForm', params.category);
   }
-  const res = await fetch(`/api/inventory?${p}`);
+  const res = await apiFetch(`/api/inventory?${p}`);
   const json = await res.json() as { success: boolean; data: { data: InventoryItem[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as InventoryItem[]);
 }
 
 async function fetchAIInsights(): Promise<AIInsight[]> {
-  const res = await fetch('/api/inventory/ai-insights');
+  const res = await apiFetch('/api/inventory/ai-insights');
   const json = await res.json() as { success: boolean; data: AIInsight[] };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ([] as AIInsight[]);
 }
 
 function exportCSV(data: InventoryItem[]) {
@@ -98,6 +103,7 @@ const AI_INSIGHT_COLORS: Record<string, string> = {
 };
 
 export function InventoryView() {
+  const router = useRouter();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -120,7 +126,7 @@ export function InventoryView() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/inventory/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/inventory/${id}`, { method: 'DELETE' });
       const json = await res.json() as { success: boolean };
       if (!json.success) throw new Error('Delete failed');
     },
@@ -306,13 +312,35 @@ export function InventoryView() {
     { label: 'Pending Transfers', value: statsLoading ? null : String(stats?.pendingTransfers ?? 0), sub: 'Auto reorder', icon: RefreshCw, color: 'text-blue-600', bg: 'bg-blue-50' },
   ];
 
+  function printInventoryLabels() {
+    if (data.length === 0) { toast.warning('No inventory items to print labels for'); return; }
+    const items = data.slice(0, 20);
+    const labelHtml = items.map((item) => {
+      const med = item.medicine as { name?: string } | undefined;
+      return `<div class="label">
+        <div class="med">${med?.name ?? 'Unknown'}</div>
+        <div class="row">Batch: ${item.batchNumber} &nbsp; Rack: ${item.rackLocation ?? '—'}</div>
+        <div class="row">Expiry: ${formatDate(item.expiryDate)} &nbsp; MRP: ₹${item.mrp}</div>
+        <div class="row">Qty: ${item.availableQuantity} ${item.dosageForm ?? ''}</div>
+      </div>`;
+    }).join('');
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(`<html><head><title>Inventory Labels</title>
+<style>@page{size:72mm 40mm;margin:0}body{font-family:Arial,sans-serif;margin:0}.label{width:70mm;height:38mm;padding:3mm 4mm;box-sizing:border-box;border:0.5px solid #ccc;page-break-after:always}.med{font-size:11pt;font-weight:bold}.row{font-size:8pt;margin-top:2px;color:#333}</style>
+</head><body>${labelHtml}</body></html>`);
+    win.document.close();
+    win.print();
+    toast.success(`${items.length} label${items.length !== 1 ? 's' : ''} sent to printer`);
+  }
+
   const QUICK_ACTIONS = [
-    { label: 'Add Medicine', icon: Plus, onClick: () => toast.info('Opening Add Medicine…') },
+    { label: 'Add Medicine', icon: Plus, onClick: () => router.push('/medicines') },
     { label: 'Add Batch', icon: Package, onClick: () => setAddOpen(true) },
-    { label: 'Stock Adjustment', icon: Edit2, onClick: () => toast.info('Select a medicine first to adjust stock') },
-    { label: 'Stock Transfer', icon: Layers, onClick: () => toast.info('Stock transfer — coming soon') },
-    { label: 'Purchase Order', icon: RefreshCw, onClick: () => toast.info('Purchase Orders — coming soon') },
-    { label: 'Print Labels', icon: Printer, onClick: () => toast.info('Label printing — coming soon') },
+    { label: 'Stock Adjustment', icon: Edit2, onClick: () => toast.info('Select a medicine from the table, then use the ⋯ menu → Adjust Stock') },
+    { label: 'Stock Transfer', icon: Layers, onClick: () => router.push('/stock?tab=inventory') },
+    { label: 'Purchase Order', icon: RefreshCw, onClick: () => router.push('/vendors') },
+    { label: 'Print Labels', icon: Printer, onClick: printInventoryLabels },
   ];
 
   return (
@@ -490,7 +518,14 @@ export function InventoryView() {
                     variant="outline"
                     size="sm"
                     className="h-6 text-2xs px-2 w-full"
-                    onClick={() => toast.info(`${insight.title} — ${insight.actionLabel}`)}
+                    onClick={() => {
+                      const dest: Record<string, string> = {
+                        reorder: '/reorder', low_stock: '/stock?tab=inventory',
+                        expiry: '/expiry', transfer: '/stock?tab=inventory',
+                        demand: '/billing', dead_stock: '/stock?tab=inventory',
+                      };
+                      router.push(dest[insight.type] ?? '/stock');
+                    }}
                   >
                     {insight.actionLabel}
                   </Button>

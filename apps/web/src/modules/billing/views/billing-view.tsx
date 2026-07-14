@@ -21,6 +21,10 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
+import { useAuthStore } from '@/store/auth-store';
+import { apiFetch } from '@/lib/api';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,8 +42,11 @@ interface CartItem {
   gstAmount: number;
   totalAmount: number;
   requiresPrescription: boolean;
+  schedule?: string | null;
   stockQty: number;
 }
+
+const SCHEDULED_DRUGS = ['H', 'H1', 'X'];
 
 interface HeldBill {
   id: string;
@@ -51,33 +58,6 @@ interface HeldBill {
   doctor: string;
   globalDiscount: number;
 }
-
-// ─── Mock stock + batch data ─────────────────────────────────────────────────
-
-const STOCK: Record<string, number> = {
-  med_001: 250, med_002: 85,  med_003: 120, med_004: 35,  med_005: 145,
-  med_006: 48,  med_007: 95,  med_008: 22,  med_009: 180, med_010: 310,
-  med_011: 62,  med_012: 80,  med_013: 120, med_014: 15,  med_015: 55,
-  med_016: 70,  med_017: 38,  med_018: 20,  med_019: 45,  med_020: 60,
-  med_021: 90,  med_022: 200, med_023: 65,  med_024: 40,  med_025: 25,
-  med_026: 88,  med_027: 12,  med_028: 150, med_029: 88,  med_030: 42,
-  med_031: 75,  med_032: 30,  med_033: 8,   med_034: 55,  med_035: 180,
-  med_036: 5,   med_037: 0,   med_038: 65,
-};
-
-const BATCH: Record<string, { batch: string; expiry: string }> = {
-  med_001: { batch: 'PCM2026A', expiry: '2028-03-31' },
-  med_002: { batch: 'AMX2025B', expiry: '2027-06-30' },
-  med_003: { batch: 'PAN2025C', expiry: '2027-08-31' },
-  med_004: { batch: 'MTF2026A', expiry: '2028-05-31' },
-  med_005: { batch: 'CET2024E', expiry: '2026-06-30' },
-  med_006: { batch: 'ATV2025C', expiry: '2027-12-31' },
-  med_007: { batch: 'AZI2024G', expiry: '2025-09-30' },
-  med_008: { batch: 'VD32024H', expiry: '2026-08-31' },
-  med_009: { batch: 'OMZ2025I', expiry: '2027-04-30' },
-  med_010: { batch: 'ASP2024J', expiry: '2026-12-31' },
-};
-const DEFAULT_BATCH = { batch: 'AUTO', expiry: '2027-12-31' };
 
 // Demo barcodes for quick scan simulation
 const DEMO_BARCODES = [
@@ -187,58 +167,195 @@ function expiryAlert(exp: string): string | null {
   return null;
 }
 
-function printReceipt(bill: Bill, total: number, payMethod: string) {
+// 80mm thermal receipt (72mm printable width). Works with thermal printer
+// Windows drivers (Epson TM series, etc.) as well as A4 printers.
+function printReceipt(bill: Bill, total: number, payMethod: string, pharmacyName = 'Pharmacy') {
+  // GST rate-wise breakup (statutory requirement on tax invoices)
+  const gstBreakup = new Map<number, { taxable: number; gst: number }>();
+  for (const i of bill.items) {
+    const rate = i.gstRate ?? 0;
+    const e = gstBreakup.get(rate) ?? { taxable: 0, gst: 0 };
+    e.taxable += i.totalAmount - (i.gstAmount ?? 0);
+    e.gst += i.gstAmount ?? 0;
+    gstBreakup.set(rate, e);
+  }
+  const gstRows = Array.from(gstBreakup.entries())
+    .filter(([rate]) => rate > 0)
+    .sort(([a], [b]) => a - b)
+    .map(([rate, v]) =>
+      `<tr><td>GST ${rate}% (CGST ${rate / 2}% + SGST ${rate / 2}%)</td><td class="r">₹${v.gst.toFixed(2)}</td></tr>`)
+    .join('');
+
+  const hasScheduled = bill.items.some((i) => {
+    const s = (i as { schedule?: string | null }).schedule;
+    return s && SCHEDULED_DRUGS.includes(s);
+  });
+
   const content = `<html><head><title>Bill ${bill.billNumber}</title>
-<style>body{font-family:monospace;padding:20px;max-width:380px;margin:0 auto}h2,p{margin:4px 0}table{width:100%;border-collapse:collapse}td{padding:3px 0}.r{text-align:right}.tot{border-top:2px solid #000;font-weight:bold}hr{border:0;border-top:1px dashed #aaa;margin:8px 0}</style>
-</head><body>
-<h2 style="text-align:center">DIVYA PHARMACY</h2>
-<p style="text-align:center;font-size:11px">12, MG Road, Bangalore — 560001 | Ph: +91-9876543210<br>GST: 29ABCDE1234F1Z5</p>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  @media print { body { width: 72mm; } }
+  * { box-sizing: border-box; }
+  body { font-family: 'Courier New', monospace; font-size: 10.5px; width: 72mm;
+         margin: 0 auto; padding: 4mm 2mm; color: #000; }
+  h2 { font-size: 13px; margin: 0; text-align: center; }
+  .sub { text-align: center; font-size: 9px; margin: 1px 0; }
+  p { margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 1.5px 0; vertical-align: top; font-size: 10.5px; }
+  .r { text-align: right; white-space: nowrap; }
+  .c { text-align: center; }
+  .tot td { border-top: 1px solid #000; font-weight: bold; font-size: 12px; padding-top: 3px; }
+  hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
+  .small { font-size: 9px; }
+  .warn { font-size: 9px; border: 1px solid #000; padding: 2px 4px; margin: 4px 0; text-align: center; }
+</style></head><body>
+<h2>${pharmacyName.toUpperCase()}</h2>
+<p class="sub">TAX INVOICE</p>
 <hr/>
-<p><b>Bill:</b> ${bill.billNumber} | <b>Date:</b> ${formatDateTime(bill.createdAt)}</p>
-<p><b>Customer:</b> ${bill.customer?.name ?? 'Walk-in Customer'}${bill.customer?.phone ? ' | Ph: ' + bill.customer.phone : ''}</p>
+<p>Bill: <b>${bill.billNumber}</b></p>
+<p>Date: ${formatDateTime(bill.createdAt)}</p>
+<p>Patient: ${bill.customer?.name ?? 'Walk-in Customer'}${bill.customer?.phone ? `<br/>Ph: ${bill.customer.phone}` : ''}</p>
+${(bill as { doctor?: string }).doctor ? `<p>Rx by: Dr. ${(bill as { doctor?: string }).doctor}</p>` : ''}
 <hr/>
-<table><tr><td><b>Item</b></td><td class="r"><b>Qty</b></td><td class="r"><b>Rate</b></td><td class="r"><b>Amt</b></td></tr>
-${bill.items.map((i) => `<tr><td>${i.medicineName}${i.discount ? ` (${i.discount}%↓)` : ''}</td><td class="r">${i.quantity}</td><td class="r">₹${i.sellingPrice}</td><td class="r">₹${i.totalAmount.toFixed(2)}</td></tr>`).join('')}
-</table><hr/>
+<table>
+<tr><td><b>Item</b></td><td class="r"><b>Qty</b></td><td class="r"><b>Rate</b></td><td class="r"><b>Amt</b></td></tr>
+${bill.items.map((i) => `
+<tr><td colspan="4" style="padding-bottom:0">${i.medicineName}</td></tr>
+<tr><td class="small">B:${i.batchNumber} E:${new Date(i.expiryDate).toLocaleDateString('en-IN', { month: '2-digit', year: '2-digit' })}${i.discount ? ` D:${i.discount}%` : ''}</td>
+<td class="r">${i.quantity}</td><td class="r">${i.sellingPrice.toFixed(2)}</td><td class="r">${i.totalAmount.toFixed(2)}</td></tr>`).join('')}
+</table>
+<hr/>
 <table>
 <tr><td>Subtotal</td><td class="r">₹${bill.subtotal.toFixed(2)}</td></tr>
 ${bill.discountAmount > 0 ? `<tr><td>Discount (${bill.discountPercent}%)</td><td class="r">-₹${bill.discountAmount.toFixed(2)}</td></tr>` : ''}
-<tr><td>GST</td><td class="r">₹${bill.taxAmount.toFixed(2)}</td></tr>
+${gstRows}
 <tr class="tot"><td>TOTAL</td><td class="r">₹${total.toFixed(2)}</td></tr>
 <tr><td>Paid (${payMethod.toUpperCase()})</td><td class="r">₹${bill.paidAmount.toFixed(2)}</td></tr>
 ${bill.balanceAmount > 0 ? `<tr><td><b>Balance Due</b></td><td class="r"><b>₹${bill.balanceAmount.toFixed(2)}</b></td></tr>` : ''}
 </table>
-<hr/><p style="text-align:center;font-size:11px">Thank you for your purchase! Please visit again.</p>
+${hasScheduled ? '<div class="warn">Schedule H/H1 drug — to be sold on prescription of a Registered Medical Practitioner only</div>' : ''}
+<hr/>
+<p class="c small">Items: ${bill.items.length} · Qty: ${bill.items.reduce((s, i) => s + i.quantity, 0)}</p>
+<p class="c small">Thank you for your purchase!<br/>Get well soon. Visit again.</p>
 </body></html>`;
-  const w = window.open('', '_blank');
+  const w = window.open('', '_blank', 'width=340,height=600');
   if (w) { w.document.write(content); w.document.close(); w.print(); }
+}
+
+// ─── Camera barcode scanner (native BarcodeDetector API) ────────────────────
+
+interface DetectedBarcode { rawValue: string }
+interface BarcodeDetectorLike { detect(source: CanvasImageSource): Promise<DetectedBarcode[]> }
+declare global {
+  interface Window {
+    BarcodeDetector?: new (opts?: { formats: string[] }) => BarcodeDetectorLike;
+  }
+}
+
+function CameraScanner({ open, onClose, onDetect }: { open: boolean; onClose: () => void; onDetect: (code: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!window.BarcodeDetector) {
+      setError('Camera scanning needs Chrome or Edge. Use a USB scanner or type the barcode instead.');
+      return;
+    }
+    let stream: MediaStream | null = null;
+    let stopped = false;
+    const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'upc_a', 'upc_e', 'qr_code'] });
+
+    async function start() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        if (stopped || !videoRef.current) return;
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        const tick = async () => {
+          if (stopped || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes.length > 0 && codes[0]) {
+              onDetect(codes[0].rawValue);
+              return; // parent closes the dialog
+            }
+          } catch { /* frame not ready yet */ }
+          setTimeout(tick, 200);
+        };
+        void tick();
+      } catch {
+        setError('Camera access denied. Allow camera permission and retry.');
+      }
+    }
+    void start();
+
+    return () => {
+      stopped = true;
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, [open, onDetect]);
+
+  useEffect(() => { if (!open) setError(null); }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle className="text-sm">Scan barcode with camera</DialogTitle></DialogHeader>
+        {error ? (
+          <p className="text-xs text-destructive py-4">{error}</p>
+        ) : (
+          <div className="relative rounded-lg overflow-hidden bg-black aspect-[4/3]">
+            <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+            <div className="absolute inset-x-8 top-1/2 -translate-y-1/2 h-16 border-2 border-primary rounded-lg pointer-events-none" />
+          </div>
+        )}
+        <p className="text-2xs text-muted-foreground text-center">Hold the barcode inside the frame — detection is automatic</p>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function searchMeds(q: string): Promise<Medicine[]> {
-  const r = await fetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=8`);
+  const r = await apiFetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=8`);
   const j = await r.json() as { success: boolean; data: { data: Medicine[] } };
-  return j.data.data;
+  if (!r.ok) throw new Error('Request failed');
+  return j.data?.data ?? ([] as Medicine[]);
 }
 
 async function fetchBills(): Promise<Bill[]> {
-  const r = await fetch('/api/billing?limit=100');
+  const r = await apiFetch('/api/billing?limit=100');
   const j = await r.json() as { success: boolean; data: { data: Bill[] } };
-  return j.data.data;
+  if (!r.ok) throw new Error('Request failed');
+  return j.data?.data ?? ([] as Bill[]);
 }
 
 async function createBill(payload: object): Promise<Bill> {
-  const r = await fetch('/api/billing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const r = await apiFetch('/api/billing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const j = await r.json() as { success: boolean; data: Bill; message?: string };
   if (!j.success) throw new Error(j.message ?? 'Failed');
   return j.data;
 }
 
 async function lookupBarcode(code: string): Promise<Medicine | null> {
-  const r = await fetch(`/api/medicines/barcode/${code.trim()}`);
+  const r = await apiFetch(`/api/medicines/barcode/${code.trim()}`);
   const j = await r.json() as { success: boolean; data: Medicine };
   return j.success ? j.data : null;
+}
+
+async function fetchMedicineInventory(medicineId: string): Promise<{ batchNumber: string; expiryDate: string; quantity: number } | null> {
+  try {
+    const r = await apiFetch(`/api/inventory?medicineId=${encodeURIComponent(medicineId)}&status=available&limit=1`);
+    if (!r.ok) return null;
+    const j = await r.json() as { data: { data: Array<{ batchNumber: string; expiryDate: string; availableQuantity: number }> } };
+    const item = j.data.data?.[0];
+    return item ? { batchNumber: item.batchNumber, expiryDate: item.expiryDate, quantity: item.availableQuantity } : null;
+  } catch {
+    return null;
+  }
 }
 
 function exportCSV(data: Bill[]) {
@@ -271,15 +388,29 @@ export function BillingView() {
   const [scanMode, setScanMode] = useState(false);
   const [scanInput, setScanInput] = useState('');
   const [scanLoading, setScanLoading] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [addingMedicineId, setAddingMedicineId] = useState<string | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const scanRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
+  const { user } = useAuthStore();
 
   const { data: suggestions = [] } = useQuery({
     queryKey: ['med-search', search],
     queryFn: () => searchMeds(search),
     enabled: search.length >= 2,
+  });
+
+  const { data: inventoryMap = {} } = useQuery<Record<string, { batchNumber: string; expiryDate: string; quantity: number } | null>>({
+    queryKey: ['inv-map', suggestions.map(m => m.id).join(',')],
+    queryFn: async () => {
+      if (!suggestions.length) return {};
+      const results = await Promise.all(suggestions.map(m => fetchMedicineInventory(m.id)));
+      return Object.fromEntries(suggestions.map((m, i) => [m.id, results[i] ?? null]));
+    },
+    enabled: suggestions.length > 0 && showSugg,
+    staleTime: 5 * 60 * 1000,
   });
 
   const subtotal = items.reduce((s, i) => s + i.sellingPrice * i.quantity * (1 - i.discount / 100), 0);
@@ -299,8 +430,9 @@ export function BillingView() {
   function sendWhatsApp(phone: string, billNo: string, amount: number) {
     const digits = phone.replace(/\D/g, '');
     const full = digits.length === 10 ? `91${digits}` : digits;
+    const pharmName = user?.tenantName ?? 'Pharmacy';
     const msg = encodeURIComponent(
-      `*Divya Pharmacy*\n\nDear Customer, your bill *${billNo}* is ready.\n*Total: ₹${amount.toFixed(2)}*\n\nThank you! Visit again. 🙏\nPhone: +91-9876543210`
+      `*${pharmName}*\n\nDear Customer, your bill *${billNo}* is ready.\n*Total: ₹${amount.toFixed(2)}*\n\nThank you! Visit again. 🙏`
     );
     window.open(`https://wa.me/${full}?text=${msg}`, '_blank');
   }
@@ -314,7 +446,7 @@ export function BillingView() {
     try {
       const med = await lookupBarcode(trimmed);
       if (med) {
-        addMedicine(med);
+        await addMedicine(med);
         setScanInput('');
         toast.success(`Scanned: ${med.name}`, { description: `₹${med.sellingPrice} · GST ${med.gstRate}%` });
       } else {
@@ -380,7 +512,7 @@ export function BillingView() {
       const savedTotal = total;
       const savedPhone = customerPhone;
       const savedBillNo = bill.billNumber;
-      printReceipt(bill, savedTotal, payMethod);
+      printReceipt(bill, savedTotal, payMethod, user?.tenantName);
       clearPOS();
       toast.success(`Bill ${savedBillNo} created`, {
         description: `${formatCurrency(savedTotal)} · ${payMethod.toUpperCase()}`,
@@ -394,23 +526,32 @@ export function BillingView() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const addMedicine = useCallback((med: Medicine) => {
+  const addMedicine = useCallback(async (med: Medicine) => {
     setSearch(''); setShowSugg(false);
-    const batch = BATCH[med.id] ?? DEFAULT_BATCH;
-    const stock = STOCK[med.id] ?? 99;
-    setItems((prev) => {
-      const idx = prev.findIndex((i) => i.medicineId === med.id);
-      if (idx >= 0) {
-        return prev.map((item, i) => i === idx ? calcLine({ ...item, quantity: item.quantity + 1 }) : item);
-      }
-      return [...prev, calcLine({
-        medicineId: med.id, medicineName: med.name, genericName: med.genericName,
-        batchNumber: batch.batch, expiryDate: batch.expiry,
-        quantity: 1, mrp: med.mrp, sellingPrice: med.sellingPrice, discount: 0,
-        gstRate: med.gstRate, gstAmount: 0, totalAmount: 0,
-        requiresPrescription: med.requiresPrescription, stockQty: stock,
-      })];
-    });
+    setAddingMedicineId(med.id);
+    try {
+      const inv = await fetchMedicineInventory(med.id);
+      const batchNum = inv?.batchNumber ?? 'AUTO';
+      const expiryDate = inv?.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const stockQty = inv?.quantity ?? 0;
+      setItems((prev) => {
+        const idx = prev.findIndex((i) => i.medicineId === med.id);
+        if (idx >= 0) {
+          return prev.map((item, i) => i === idx ? calcLine({ ...item, quantity: item.quantity + 1 }) : item);
+        }
+        return [...prev, calcLine({
+          medicineId: med.id, medicineName: med.name, genericName: med.genericName,
+          batchNumber: batchNum, expiryDate,
+          quantity: 1, mrp: med.mrp, sellingPrice: med.sellingPrice, discount: 0,
+          gstRate: med.gstRate, gstAmount: 0, totalAmount: 0,
+          requiresPrescription: med.requiresPrescription, schedule: med.schedule ?? null, stockQty,
+        })];
+      });
+    } catch {
+      toast.error(`Could not load inventory for ${med.name}`);
+    } finally {
+      setAddingMedicineId(null);
+    }
   }, []);
 
   const updateItem = useCallback((idx: number, field: keyof CartItem, value: number) => {
@@ -423,6 +564,14 @@ export function BillingView() {
 
   const handlePay = useCallback(() => {
     if (items.length === 0) { toast.error('Add at least one medicine'); return; }
+    const scheduled = items.filter((i) => i.schedule && SCHEDULED_DRUGS.includes(i.schedule));
+    if (scheduled.length > 0 && (!customerName.trim() || !doctor.trim())) {
+      toast.error('Schedule H/H1/X drug — patient & doctor details required', {
+        description: `${scheduled.map((i) => i.medicineName).join(', ')} cannot be dispensed without prescription details (Drugs & Cosmetics Act).`,
+        duration: 8000,
+      });
+      return;
+    }
     const billItems = items.map((item, i) => ({ id: `bi_${Date.now()}_${i}`, ...item }));
     mutation.mutate({
       type: 'sale',
@@ -467,7 +616,7 @@ export function BillingView() {
       if (e.key === 'Enter' && showSugg && suggestions.length > 0 && tag !== 'INPUT') {
         e.preventDefault();
         const first = suggestions[0];
-        if (first) addMedicine(first);
+        if (first) void addMedicine(first);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -574,10 +723,17 @@ export function BillingView() {
                         if (e.key === 'Escape') { setScanMode(false); setScanInput(''); }
                       }}
                       placeholder="Point scanner at barcode… or type barcode + Enter"
-                      className="w-full h-9 px-3 text-sm font-mono border border-primary/30 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      className="w-full h-9 px-3 pr-20 text-sm font-mono border border-primary/30 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary/50"
                       autoComplete="off"
                     />
-                    {scanLoading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />}
+                    {scanLoading && <Loader2 className="absolute right-20 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />}
+                    <button
+                      onClick={() => setCameraOpen(true)}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-2xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                      title="Scan with camera (Chrome/Edge)"
+                    >
+                      <QrCode className="h-3 w-3" /> Camera
+                    </button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <span className="text-2xs text-muted-foreground">Demo scan:</span>
@@ -606,17 +762,22 @@ export function BillingView() {
                     </div>
                   ) : (
                     suggestions.map((med, idx) => {
-                      const stock = STOCK[med.id] ?? 99;
-                      const batInfo = BATCH[med.id] ?? DEFAULT_BATCH;
-                      const { text: stockText, cls: stockCls } = stockLabel(stock, med.reorderLevel);
-                      const expWarn = expiryAlert(batInfo.expiry);
+                      const inv = inventoryMap[med.id];
+                      const stock = inv != null ? inv.quantity : null;
+                      const batchNum = inv?.batchNumber ?? '—';
+                      const expiry = inv?.expiryDate;
+                      const { text: stockText, cls: stockCls } = stock !== null
+                        ? stockLabel(stock, med.reorderLevel)
+                        : { text: 'Checking stock…', cls: 'text-muted-foreground' };
+                      const expWarn = expiry ? expiryAlert(expiry) : null;
                       const outOfStock = stock === 0;
+                      const isAdding = addingMedicineId === med.id;
                       return (
                         <button
                           key={med.id}
                           type="button"
-                          onMouseDown={(e) => { e.preventDefault(); if (!outOfStock) addMedicine(med); }}
-                          disabled={outOfStock}
+                          onMouseDown={(e) => { e.preventDefault(); if (!outOfStock && !isAdding) void addMedicine(med); }}
+                          disabled={outOfStock || isAdding}
                           className={cn(
                             'group w-full rounded-lg border border-border bg-card p-3 text-left transition-all',
                             idx === 0 && 'border-primary/40 bg-primary/5',
@@ -633,8 +794,11 @@ export function BillingView() {
                               </div>
                               <p className="text-xs text-muted-foreground truncate">{med.genericName} · {med.manufacturer}</p>
                               <div className="flex items-center gap-3 mt-1.5">
-                                <span className={cn('text-xs font-medium', stockCls)}>{stockText}</span>
-                                <span className="text-xs text-muted-foreground">Batch: {batInfo.batch}</span>
+                                {isAdding
+                                  ? <span className="text-xs text-primary flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Adding…</span>
+                                  : <span className={cn('text-xs font-medium', stockCls)}>{stockText}</span>
+                                }
+                                <span className="text-xs text-muted-foreground">Batch: {batchNum}</span>
                                 {expWarn && <span className="text-xs text-warning-600 font-medium">{expWarn}</span>}
                               </div>
                             </div>
@@ -701,6 +865,11 @@ export function BillingView() {
                 <Input placeholder="Phone number" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} maxLength={10} className="h-8 text-xs" />
               </div>
               <Input placeholder="Doctor name (for Rx)" value={doctor} onChange={(e) => setDoctor(e.target.value)} className="mt-1.5 h-8 text-xs" />
+              {items.some((i) => i.schedule && SCHEDULED_DRUGS.includes(i.schedule)) && (!customerName.trim() || !doctor.trim()) && (
+                <p className="mt-1.5 text-[10px] text-destructive font-medium bg-destructive/10 rounded px-2 py-1">
+                  ⚠ Schedule H/H1/X drug in cart — patient name &amp; doctor name are mandatory
+                </p>
+              )}
             </div>
 
             {/* Cart */}
@@ -717,7 +886,9 @@ export function BillingView() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold truncate leading-tight">{item.medicineName}</p>
                         <p className="text-[10px] text-muted-foreground">{item.genericName} · GST {item.gstRate}%
-                          {item.requiresPrescription && <span className="ml-1 text-warning-600 font-semibold">· Rx</span>}
+                          {item.schedule && SCHEDULED_DRUGS.includes(item.schedule)
+                            ? <span className="ml-1 text-destructive font-semibold">· Sch {item.schedule}</span>
+                            : item.requiresPrescription && <span className="ml-1 text-warning-600 font-semibold">· Rx</span>}
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
@@ -879,6 +1050,12 @@ export function BillingView() {
       {mode === 'history' && (
         <BillHistory onNewBill={() => setMode('pos')} />
       )}
+
+      <CameraScanner
+        open={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onDetect={(code) => { setCameraOpen(false); void handleBarcode(code); }}
+      />
     </div>
   );
 }
@@ -886,6 +1063,9 @@ export function BillingView() {
 // ─── Bill history panel ───────────────────────────────────────────────────────
 
 function BillHistory({ onNewBill }: { onNewBill: () => void }) {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const [viewBill, setViewBill] = useState<Bill | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['billing'], queryFn: fetchBills });
 
   const revenue = data.filter((b) => b.status === 'completed').reduce((s, b) => s + b.totalAmount, 0);
@@ -895,7 +1075,7 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
   };
 
   function doPrint(bill: Bill) {
-    printReceipt(bill, bill.totalAmount, bill.paymentMethod ?? 'cash');
+    printReceipt(bill, bill.totalAmount, bill.paymentMethod ?? 'cash', user?.tenantName);
   }
 
   const columns: ColumnDef<Bill>[] = [
@@ -955,7 +1135,7 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
             <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => toast.info(`Viewing ${row.original.billNumber}`)}>
+            <DropdownMenuItem onClick={() => setViewBill(row.original)}>
               <Eye className="h-4 w-4" /> View Bill
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => doPrint(row.original)}>
@@ -972,7 +1152,7 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem destructive onClick={() => toast.info('Return processing coming soon')}>
+            <DropdownMenuItem destructive onClick={() => router.push(`/returns?billId=${row.original.id}&billNumber=${encodeURIComponent(row.original.billNumber)}`)}>
               Process Return
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -982,6 +1162,7 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
   ];
 
   return (
+    <>
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="px-5 py-3 border-b border-border flex items-center justify-between shrink-0">
         <div className="flex gap-6">
@@ -1018,5 +1199,77 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
         />
       </div>
     </div>
+
+    {/* Bill detail dialog */}
+    <Dialog open={!!viewBill} onOpenChange={() => setViewBill(null)}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-mono text-primary">{viewBill?.billNumber}</DialogTitle>
+        </DialogHeader>
+        {viewBill && (
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-2 gap-y-1.5 gap-x-4 rounded-lg bg-muted/40 p-3 text-sm">
+              <div><span className="text-muted-foreground">Date: </span>{formatDateTime(viewBill.createdAt)}</div>
+              <div><span className="text-muted-foreground">Payment: </span><span className="capitalize font-medium">{viewBill.paymentMethod ?? 'cash'}</span></div>
+              <div><span className="text-muted-foreground">Customer: </span>{viewBill.customer?.name ?? 'Walk-in'}</div>
+              <div><span className="text-muted-foreground">Status: </span>
+                <Badge variant={viewBill.status === 'completed' ? 'success' : viewBill.status === 'cancelled' ? 'muted' : 'warning'} dot className="text-xs capitalize">{viewBill.status.replace('_', ' ')}</Badge>
+              </div>
+              {viewBill.customer?.phone && <div className="col-span-2"><span className="text-muted-foreground">Phone: </span>{viewBill.customer.phone}</div>}
+            </div>
+
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="text-left py-1.5 font-medium">Medicine</th>
+                  <th className="text-right py-1.5 font-medium">Qty</th>
+                  <th className="text-right py-1.5 font-medium">Rate</th>
+                  <th className="text-right py-1.5 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {viewBill.items.map((item, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2">
+                      <p className="font-medium">{item.medicineName}</p>
+                      {item.discount > 0 && <p className="text-xs text-success">{item.discount}% off</p>}
+                    </td>
+                    <td className="text-right py-2 tabular-nums">{item.quantity}</td>
+                    <td className="text-right py-2 tabular-nums">₹{item.sellingPrice}</td>
+                    <td className="text-right py-2 tabular-nums font-semibold">₹{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="space-y-1 rounded-lg bg-muted/40 px-3 py-2">
+              <div className="flex justify-between text-muted-foreground text-xs"><span>Subtotal</span><span>₹{Number(viewBill.subtotal ?? 0).toFixed(2)}</span></div>
+              {(viewBill.discountAmount ?? 0) > 0 && (
+                <div className="flex justify-between text-success text-xs"><span>Discount</span><span>-₹{Number(viewBill.discountAmount).toFixed(2)}</span></div>
+              )}
+              <div className="flex justify-between text-muted-foreground text-xs"><span>GST</span><span>₹{Number(viewBill.taxAmount ?? 0).toFixed(2)}</span></div>
+              <Separator className="my-1" />
+              <div className="flex justify-between font-bold text-base">
+                <span>Total</span>
+                <span className="text-primary tabular-nums">{formatCurrency(viewBill.totalAmount)}</span>
+              </div>
+              {(viewBill.balanceAmount ?? 0) > 0 && (
+                <div className="flex justify-between text-warning-700 text-xs font-semibold"><span>Balance Due</span><span>₹{Number(viewBill.balanceAmount).toFixed(2)}</span></div>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => doPrint(viewBill)}>
+                <Printer className="h-3.5 w-3.5" /> Print Receipt
+              </Button>
+              <Button size="sm" variant="destructive" className="flex-1 gap-1.5" onClick={() => { setViewBill(null); router.push(`/returns?billId=${viewBill.id}&billNumber=${encodeURIComponent(viewBill.billNumber)}`); }}>
+                Process Return
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

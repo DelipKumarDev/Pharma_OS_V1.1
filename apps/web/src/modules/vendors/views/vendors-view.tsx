@@ -25,39 +25,43 @@ import { cn } from '@/lib/utils';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { apiFetch } from '@/lib/api';
 
 async function fetchVendorStats(): Promise<VendorStats> {
-  const res = await fetch('/api/vendors/stats');
+  const res = await apiFetch('/api/vendors/stats');
   const json = await res.json() as { success: boolean; data: VendorStats };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ({} as VendorStats);
 }
 
 async function fetchVendors(search?: string, status?: string): Promise<Vendor[]> {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
   if (status && status !== 'all') params.set('status', status);
-  const res = await fetch(`/api/vendors?${params}`);
+  const res = await apiFetch(`/api/vendors?${params}`);
   const json = await res.json() as { success: boolean; data: { data: Vendor[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as Vendor[]);
 }
 
 async function fetchInvoices(status?: string): Promise<PurchaseInvoice[]> {
   const params = new URLSearchParams();
   if (status && status !== 'all') params.set('status', status);
-  const res = await fetch(`/api/purchase-invoices?${params}`);
+  const res = await apiFetch(`/api/purchase-invoices?${params}`);
   const json = await res.json() as { success: boolean; data: { data: PurchaseInvoice[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as PurchaseInvoice[]);
 }
 
 async function createVendor(data: Record<string, unknown>): Promise<Vendor> {
-  const res = await fetch('/api/vendors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const res = await apiFetch('/api/vendors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const json = await res.json() as { success: boolean; data: Vendor; message?: string };
   if (!json.success) throw new Error(json.message ?? 'Failed');
   return json.data;
 }
 
 async function confirmInvoice(id: string): Promise<void> {
-  await fetch(`/api/purchase-invoices/${id}/confirm`, { method: 'PATCH' });
+  await apiFetch(`/api/purchase-invoices/${id}/confirm`, { method: 'PATCH' });
 }
 
 const vendorSchema = z.object({
@@ -166,15 +170,15 @@ function VendorDetailSheet({ vendor, open, onOpenChange }: { vendor: Vendor | nu
   const { data: invoices = [] } = useQuery({
     queryKey: ['vendor-invoices', vendor?.id],
     queryFn: () => {
-      const res = fetch(`/api/vendors/${vendor!.id}/invoices`).then(r => r.json()) as Promise<{ success: boolean; data: { data: PurchaseInvoice[] } }>;
-      return res.then(j => j.data.data);
+      const res = apiFetch(`/api/vendors/${vendor!.id}/invoices`).then(r => r.json()) as Promise<{ success: boolean; data: { data: PurchaseInvoice[] } }>;
+      return res.then(j => j.data?.data ?? ([] as PurchaseInvoice[]));
     },
     enabled: !!vendor,
   });
 
   const { data: payments = [] } = useQuery({
     queryKey: ['vendor-payments', vendor?.id],
-    queryFn: () => fetch(`/api/vendors/${vendor!.id}/payments`).then(r => r.json()).then((j: { success: boolean; data: { data: unknown[] } }) => j.data.data),
+    queryFn: () => apiFetch(`/api/vendors/${vendor!.id}/payments`).then(r => r.json()).then((j: { success: boolean; data: { data: unknown[] } }) => j.data?.data ?? []),
     enabled: !!vendor,
   });
 
@@ -303,10 +307,97 @@ function InvoiceRow({ invoice, onConfirm }: { invoice: PurchaseInvoice; onConfir
   );
 }
 
+const paymentSchema = z.object({
+  amount: z.coerce.number().min(1, 'Amount required'),
+  paymentMode: z.enum(['cash', 'neft', 'rtgs', 'upi', 'cheque']),
+  referenceNumber: z.string().optional(),
+  notes: z.string().optional(),
+});
+type PaymentFormValues = z.infer<typeof paymentSchema>;
+
+function RecordPaymentDialog({ vendor, open, onOpenChange }: { vendor: Vendor | null; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const qc = useQueryClient();
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<PaymentFormValues>({
+    resolver: zodResolver(paymentSchema),
+    defaultValues: { paymentMode: 'neft' },
+  });
+
+  const mutation = useMutation({
+    mutationFn: async (data: PaymentFormValues) => {
+      const r = await apiFetch(`/api/vendors/${vendor!.id}/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, paymentDate: new Date().toISOString() }),
+      });
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!j.success) throw new Error(j.message ?? 'Failed to record payment');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vendors'] });
+      qc.invalidateQueries({ queryKey: ['vendor-stats'] });
+      qc.invalidateQueries({ queryKey: ['vendor-payments', vendor?.id] });
+      toast.success('Payment recorded successfully');
+      onOpenChange(false);
+      reset();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!vendor) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Record Payment</DialogTitle>
+        </DialogHeader>
+        <div className="rounded-lg bg-muted/40 px-3 py-2 mb-2">
+          <p className="text-sm font-medium">{vendor.name}</p>
+          {vendor.pendingPayment > 0 && (
+            <p className="text-xs text-warning-700">Pending: {formatCurrency(vendor.pendingPayment)}</p>
+          )}
+        </div>
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-3">
+          <div className="space-y-1">
+            <Label>Amount Paid (₹) <span className="text-destructive">*</span></Label>
+            <Input {...register('amount')} type="number" placeholder="0.00" step="0.01" />
+            {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
+          </div>
+          <div className="space-y-1">
+            <Label>Payment Mode <span className="text-destructive">*</span></Label>
+            <select {...register('paymentMode')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+              <option value="neft">NEFT / Bank Transfer</option>
+              <option value="rtgs">RTGS</option>
+              <option value="upi">UPI</option>
+              <option value="cheque">Cheque</option>
+              <option value="cash">Cash</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label>Reference / Transaction No.</Label>
+            <Input {...register('referenceNumber')} placeholder="UTR / Cheque No. / Ref ID" />
+          </div>
+          <div className="space-y-1">
+            <Label>Notes</Label>
+            <Input {...register('notes')} placeholder="Optional notes" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={mutation.isPending}>
+              {mutation.isPending ? 'Saving…' : 'Record Payment'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function VendorsView() {
   const [addOpen, setAddOpen] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [paymentVendor, setPaymentVendor] = useState<Vendor | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('all');
@@ -328,6 +419,24 @@ export function VendorsView() {
     mutationFn: confirmInvoice,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase-invoices'] }); toast.success('Invoice confirmed — inventory updated'); },
     onError: () => toast.error('Failed to confirm invoice'),
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await apiFetch(`/api/vendors/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'inactive' }),
+      });
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!j.success) throw new Error(j.message ?? 'Failed');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vendors'] });
+      qc.invalidateQueries({ queryKey: ['vendor-stats'] });
+      toast.success('Vendor deactivated');
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   function exportCSV() {
@@ -427,14 +536,19 @@ export function VendorsView() {
             <DropdownMenuItem onClick={() => { setSelectedVendor(row.original); setDetailOpen(true); }}>
               <Eye className="h-4 w-4" /> View Details
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info('Record payment — coming soon')}>
+            <DropdownMenuItem onClick={() => setPaymentVendor(row.original)}>
               <Wallet className="h-4 w-4" /> Record Payment
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info('Upload invoice — coming soon')}>
-              <Upload className="h-4 w-4" /> Upload Invoice
+            <DropdownMenuItem onClick={() => { setSelectedVendor(row.original); setDetailOpen(true); toast.info('View invoices in the detail panel'); }}>
+              <Upload className="h-4 w-4" /> View Invoices
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem destructive onClick={() => toast.info('Deactivate vendor — confirm first')}>
+            <DropdownMenuItem destructive onClick={() => {
+              if (row.original.status === 'inactive') { toast.info('Vendor is already inactive'); return; }
+              if (confirm(`Deactivate ${row.original.name}? They will no longer appear in active vendor lists.`)) {
+                deactivateMutation.mutate(row.original.id);
+              }
+            }}>
               <Ban className="h-4 w-4" /> Deactivate
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -463,7 +577,11 @@ export function VendorsView() {
           <Button variant="outline" size="sm" onClick={exportCSV}>
             <Download className="h-4 w-4" /> Export
           </Button>
-          <Button variant="outline" size="sm" onClick={() => toast.info('OCR invoice upload — coming soon')}>
+          <Button variant="outline" size="sm" onClick={() => {
+            const tab = document.querySelector('[data-value="invoices"]') as HTMLButtonElement | null;
+            tab?.click();
+            toast.info('Switch to Purchase Invoices tab to manage invoices');
+          }}>
             <Upload className="h-4 w-4" /> Upload Invoice
           </Button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
@@ -559,6 +677,7 @@ export function VendorsView() {
 
       <AddVendorDialog open={addOpen} onOpenChange={setAddOpen} />
       <VendorDetailSheet vendor={selectedVendor} open={detailOpen} onOpenChange={setDetailOpen} />
+      <RecordPaymentDialog vendor={paymentVendor} open={!!paymentVendor} onOpenChange={(o) => { if (!o) setPaymentVendor(null); }} />
     </div>
   );
 }

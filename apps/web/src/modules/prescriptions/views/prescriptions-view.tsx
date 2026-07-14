@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
@@ -27,33 +28,38 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function fetchStats(): Promise<PrescriptionStats> {
-  const r = await fetch('/api/prescriptions/stats');
-  return ((await r.json()) as { data: PrescriptionStats }).data;
+  const r = await apiFetch('/api/prescriptions/stats');
+  const j = await r.json() as { success: boolean; data: PrescriptionStats };
+  if (!j.success || !j.data) throw new Error('Failed to load prescription stats');
+  return j.data;
 }
 
 async function fetchRx(status?: string): Promise<Prescription[]> {
   const url = status ? `/api/prescriptions?status=${status}` : '/api/prescriptions';
-  const r = await fetch(url);
-  return ((await r.json()) as { data: { data: Prescription[] } }).data.data;
+  const r = await apiFetch(url);
+  const j = await r.json() as { success: boolean; data: { data: Prescription[] } };
+  if (!r.ok) throw new Error('Request failed');
+  return j.data?.data ?? ([] as Prescription[]);
 }
 
 async function approveRx(id: string) {
-  await fetch(`/api/prescriptions/${id}/approve`, { method: 'PATCH' });
+  await apiFetch(`/api/prescriptions/${id}/approve`, { method: 'PATCH' });
 }
 
 async function rejectRx(id: string, reason: string) {
-  await fetch(`/api/prescriptions/${id}/reject`, {
+  await apiFetch(`/api/prescriptions/${id}/reject`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason }),
   });
 }
 
 async function dispenseRx(id: string) {
-  await fetch(`/api/prescriptions/${id}/dispense`, { method: 'PATCH' });
+  await apiFetch(`/api/prescriptions/${id}/dispense`, { method: 'PATCH' });
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -125,6 +131,7 @@ function RejectDialog({ rx, onClose }: { rx: Prescription; onClose: () => void }
 // ─── Prescription detail sheet ────────────────────────────────────────────────
 
 function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void }) {
+  const router = useRouter();
   const [expanded, setExpanded] = useState(true);
   const [rejectOpen, setRejectOpen] = useState(false);
   const qc = useQueryClient();
@@ -284,7 +291,7 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
             )}
             {rx.status === 'approved' && (
               <>
-                <Button variant="outline" className="flex-1" onClick={() => toast.info('Create bill from POS and link this prescription')}>
+                <Button variant="outline" className="flex-1" onClick={() => { onClose(); router.push(`/billing?rxId=${rx.id}&customerName=${encodeURIComponent(rx.customerName)}`); }}>
                   <Receipt className="h-4 w-4" /> Create Bill
                 </Button>
                 <Button className="flex-1" onClick={() => dispenseMut.mutate()} disabled={dispenseMut.isPending}>
@@ -323,7 +330,7 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           duration: m.duration, quantity: m.qty ? Number(m.qty) : undefined,
         })),
       };
-      const r = await fetch('/api/prescriptions', {
+      const r = await apiFetch('/api/prescriptions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });

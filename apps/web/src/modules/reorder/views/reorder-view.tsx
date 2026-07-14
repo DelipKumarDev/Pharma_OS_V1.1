@@ -15,34 +15,38 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 async function fetchReorderStats(): Promise<ReorderStats> {
-  const res = await fetch('/api/reorder/stats');
+  const res = await apiFetch('/api/reorder/stats');
   const json = await res.json() as { success: boolean; data: ReorderStats };
-  return json.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? ({} as ReorderStats);
 }
 
 async function fetchReorderItems(priority?: string, status?: string): Promise<ReorderItem[]> {
   const params = new URLSearchParams();
   if (priority && priority !== 'all') params.set('priority', priority);
   if (status && status !== 'all') params.set('status', status);
-  const res = await fetch(`/api/reorder?${params}`);
+  const res = await apiFetch(`/api/reorder?${params}`);
   const json = await res.json() as { success: boolean; data: { data: ReorderItem[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as ReorderItem[]);
 }
 
 async function fetchAlerts(): Promise<ReorderAlert[]> {
-  const res = await fetch('/api/reorder/alerts?acknowledged=false');
+  const res = await apiFetch('/api/reorder/alerts?acknowledged=false');
   const json = await res.json() as { success: boolean; data: { data: ReorderAlert[] } };
-  return json.data.data;
+  if (!res.ok) throw new Error('Request failed');
+  return json.data?.data ?? ([] as ReorderAlert[]);
 }
 
 async function updateReorderItem(id: string, data: Partial<ReorderItem>): Promise<void> {
-  await fetch(`/api/reorder/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  await apiFetch(`/api/reorder/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 }
 
 async function acknowledgeAlert(id: string): Promise<void> {
-  await fetch(`/api/reorder/alerts/${id}/acknowledge`, { method: 'PATCH' });
+  await apiFetch(`/api/reorder/alerts/${id}/acknowledge`, { method: 'PATCH' });
 }
 
 const PRIORITY_CONFIG = {
