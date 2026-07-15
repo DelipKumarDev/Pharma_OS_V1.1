@@ -10,7 +10,8 @@ function makeQueryClient() {
       queries: {
         staleTime: 60 * 1000,
         retry: (failureCount, error: unknown) => {
-          if (error instanceof Error && error.message.includes('401')) return false;
+          // Never retry auth failures or rate limiting — retries amplify the problem
+          if (error instanceof Error && (error.message.includes('401') || error.message.includes('429'))) return false;
           return failureCount < 2;
         },
       },

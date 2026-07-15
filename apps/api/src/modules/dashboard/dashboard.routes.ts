@@ -8,49 +8,78 @@ import { NextFunction, Response } from 'express';
 const router = Router();
 router.use(authenticate);
 
+// Dashboard KPIs change slowly; a short cache absorbs concurrent load from
+// multiple terminals without stale-feeling data (frontend staleTime is 60s).
+const CACHE_TTL_MS = 30_000;
+const cache = new Map<string, { data: unknown; at: number }>();
+
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
+
+    const hit = cache.get(tenantId);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+      sendSuccess(res, hit.data);
+      return;
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    const alertDays = tenant?.expiryAlertDays ?? 90;
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const [
-      todayBills, yesterdayBills,
+      tenant,
+      todayAgg, yesterdayAgg,
       totalMedicines, lowStockCount,
       expiringSoonCount, activeCustomers,
       pendingPrescriptions, pendingReturns,
+      recentBills, topItems, categoryItems,
     ] = await Promise.all([
-      prisma.bill.findMany({ where: { tenantId, createdAt: { gte: today }, status: 'completed', deletedAt: null } }),
-      prisma.bill.findMany({ where: { tenantId, createdAt: { gte: yesterday, lt: today }, status: 'completed', deletedAt: null } }),
+      prisma.tenant.findUnique({ where: { id: tenantId }, select: { expiryAlertDays: true } }),
+      prisma.bill.aggregate({
+        where: { tenantId, createdAt: { gte: today }, status: 'completed', deletedAt: null },
+        _sum: { totalAmount: true }, _count: true,
+      }),
+      prisma.bill.aggregate({
+        where: { tenantId, createdAt: { gte: yesterday, lt: today }, status: 'completed', deletedAt: null },
+        _sum: { totalAmount: true }, _count: true,
+      }),
       prisma.medicine.count({ where: { tenantId, status: 'active', deletedAt: null } }),
       prisma.inventoryItem.count({ where: { tenantId, status: 'low_stock', deletedAt: null } }),
       prisma.inventoryItem.count({ where: { tenantId, expiryStatus: 'expiring_soon', deletedAt: null } }),
       prisma.customer.count({ where: { tenantId, status: 'active', deletedAt: null } }),
       prisma.prescription.count({ where: { tenantId, status: 'pending_review', deletedAt: null } }),
       prisma.returnRequest.count({ where: { tenantId, status: 'pending', deletedAt: null } }),
+      prisma.bill.findMany({
+        where: { tenantId, createdAt: { gte: thirtyDaysAgo }, status: 'completed', deletedAt: null },
+        select: { totalAmount: true, createdAt: true },
+      }),
+      prisma.billItem.groupBy({
+        by: ['medicineName'],
+        where: { bill: { tenantId, createdAt: { gte: thirtyDaysAgo }, deletedAt: null } },
+        _sum: { quantity: true, totalAmount: true },
+        orderBy: { _sum: { totalAmount: 'desc' } },
+        take: 5,
+      }),
+      prisma.billItem.findMany({
+        where: { bill: { tenantId, createdAt: { gte: thirtyDaysAgo }, deletedAt: null } },
+        select: { totalAmount: true, medicine: { select: { category: true } } },
+      }),
     ]);
 
-    const todayRevenue = todayBills.reduce((sum, b) => sum + b.totalAmount, 0);
-    const yesterdayRevenue = yesterdayBills.reduce((sum, b) => sum + b.totalAmount, 0);
-    const todayBillsCount = todayBills.length;
-    const yesterdayBillsCount = yesterdayBills.length;
+    const alertDays = tenant?.expiryAlertDays ?? 90;
+    const todayRevenue = todayAgg._sum.totalAmount ?? 0;
+    const yesterdayRevenue = yesterdayAgg._sum.totalAmount ?? 0;
+    const todayBillsCount = todayAgg._count;
+    const yesterdayBillsCount = yesterdayAgg._count;
 
     const revenueChange = yesterdayRevenue === 0 ? 0 : ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100;
     const billsChange = yesterdayBillsCount === 0 ? 0 : ((todayBillsCount - yesterdayBillsCount) / yesterdayBillsCount) * 100;
 
     // Revenue chart - last 30 days
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const recentBills = await prisma.bill.findMany({
-      where: { tenantId, createdAt: { gte: thirtyDaysAgo }, status: 'completed', deletedAt: null },
-      select: { totalAmount: true, createdAt: true },
-    });
-
     const revenueByDate = new Map<string, { revenue: number; bills: number }>();
     for (let i = 0; i < 30; i++) {
       const d = new Date();
@@ -67,15 +96,6 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 
     const revenueChart = Array.from(revenueByDate.entries()).map(([date, v]) => ({ date, ...v }));
 
-    // Top medicines by bill items
-    const topItems = await prisma.billItem.groupBy({
-      by: ['medicineName'],
-      where: { bill: { tenantId, createdAt: { gte: thirtyDaysAgo }, deletedAt: null } },
-      _sum: { quantity: true, totalAmount: true },
-      orderBy: { _sum: { totalAmount: 'desc' } },
-      take: 5,
-    });
-
     const topMedicines = topItems.map(item => ({
       name: item.medicineName,
       qty: item._sum.quantity ?? 0,
@@ -83,11 +103,6 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     }));
 
     // Sales by category
-    const categoryItems = await prisma.billItem.findMany({
-      where: { bill: { tenantId, createdAt: { gte: thirtyDaysAgo }, deletedAt: null } },
-      include: { medicine: { select: { category: true } } },
-    });
-
     const categoryMap = new Map<string, number>();
     for (const item of categoryItems) {
       const cat = item.medicine?.category ?? 'other';
@@ -108,7 +123,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       alerts.push({ id: 'low_stock', type: 'stock', message: `${lowStockCount} medicines below reorder level`, severity: 'error' });
     }
 
-    sendSuccess(res, {
+    const data = {
       kpis: {
         todayRevenue, todayBills: todayBillsCount, lowStockItems: lowStockCount,
         expiringItems: expiringSoonCount, totalMedicines, activeCustomers,
@@ -120,7 +135,10 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       topMedicines,
       salesByCategory,
       alerts,
-    });
+    };
+
+    cache.set(tenantId, { data, at: Date.now() });
+    sendSuccess(res, data);
   } catch (err) { next(err); }
 });
 
