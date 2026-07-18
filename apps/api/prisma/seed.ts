@@ -176,24 +176,53 @@ async function main() {
     },
   });
 
-  // Assign all permissions to admin
-  for (const permId of permissionIds) {
-    await prisma.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: adminRole.id, permissionId: permId } },
-      update: {},
-      create: { roleId: adminRole.id, permissionId: permId },
-    });
+  // Map "module:action" → permission id for explicit, non-fragile role grants.
+  const permByKey = new Map<string, string>();
+  permissionDefs.forEach((d, i) => permByKey.set(`${d.module}:${d.action}`, permissionIds[i]!));
+
+  async function grant(roleId: string, keys: string[]) {
+    for (const key of keys) {
+      const permId = permByKey.get(key);
+      if (!permId) { console.warn(`⚠️  seed: unknown permission ${key}`); continue; }
+      await prisma.rolePermission.upsert({
+        where: { roleId_permissionId: { roleId, permissionId: permId } },
+        update: {},
+        create: { roleId, permissionId: permId },
+      });
+    }
   }
 
-  // Assign relevant permissions to pharmacist
-  const pharmacistPerms = permissionIds.slice(0, 3); // medicines view + inv view + billing view/create
-  for (const permId of pharmacistPerms) {
-    await prisma.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: pharmacistRole.id, permissionId: permId } },
-      update: {},
-      create: { roleId: pharmacistRole.id, permissionId: permId },
-    });
-  }
+  // Pharma Admin — full access (every defined permission).
+  await grant(adminRole.id, [...permByKey.keys()]);
+
+  // Pharmacist — dispensing + billing + prescriptions, read stock/customers.
+  await grant(pharmacistRole.id, [
+    'medicines:view', 'inventory:view',
+    'billing:view', 'billing:create',
+    'customers:view', 'customers:create',
+    'prescriptions:view', 'prescriptions:create', 'prescriptions:approve',
+    'returns:view', 'returns:create',
+  ]);
+
+  // Inventory Manager — full stock + medicine master + vendors, read reports.
+  await grant(inventoryRole.id, [
+    'medicines:view', 'medicines:create', 'medicines:edit',
+    'inventory:view', 'inventory:create', 'inventory:edit', 'inventory:delete',
+    'vendors:view', 'vendors:create', 'vendors:edit',
+    'reports:view',
+  ]);
+
+  // Billing Assistant — sales only, read stock/customers.
+  await grant(billingRole.id, [
+    'billing:view', 'billing:create',
+    'customers:view', 'customers:create',
+    'medicines:view', 'inventory:view',
+  ]);
+
+  // Reports Viewer — read-only reporting.
+  await grant(reportsRole.id, [
+    'reports:view', 'reports:export',
+  ]);
 
   console.log('✅ Roles seeded');
 

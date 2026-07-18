@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import * as userService from './user.service';
 import { sendSuccess } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
@@ -12,16 +12,16 @@ router.use(authenticate);
 const t = (req: AuthRequest) => req.user!.tenantId;
 
 // Users
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/', requirePermission('users', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.listUsers(t(req))); } catch (err) { next(err); }
 });
-router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/', requirePermission('users', 'create'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.createUser(t(req), req.body, req.user!.sub, req.user!.name), 'User invited', 201); } catch (err) { next(err); }
 });
-router.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.put('/:id', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.updateUser(t(req), req.params['id']!, req.body, req.user!.sub, req.user!.name)); } catch (err) { next(err); }
 });
-router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/:id/status', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { status } = req.body as { status: UserStatus };
     const validStatuses: string[] = ['active', 'inactive', 'suspended', 'pending'];

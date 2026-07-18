@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { NextFunction, Response } from 'express';
 import { Prisma, DrugSchedule } from '@prisma/client';
 import { prisma } from '../../config/database';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import type { AuthRequest } from '../../middleware/authenticate';
 import { sendSuccess, paginate } from '../../utils/response';
 import { toCsv, sendCsv } from '../../utils/csv';
@@ -38,7 +38,7 @@ function buildWhere(tenantId: string, query: Record<string, string | undefined>)
 }
 
 // GET /api/schedule-register/stats
-router.get('/stats', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/stats', requirePermission('reports', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
     const startOfMonth = new Date();
@@ -61,7 +61,7 @@ router.get('/stats', async (req: AuthRequest, res: Response, next: NextFunction)
 });
 
 // GET /api/schedule-register/export — statutory register as CSV
-router.get('/export', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/export', requirePermission('reports', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
     const where = buildWhere(tenantId, req.query as Record<string, string | undefined>);
@@ -94,7 +94,7 @@ router.get('/export', async (req: AuthRequest, res: Response, next: NextFunction
 });
 
 // GET /api/schedule-register — paginated list
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
     const query = req.query as Record<string, string | undefined>;

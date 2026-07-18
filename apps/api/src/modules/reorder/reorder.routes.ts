@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import { prisma } from '../../config/database';
 import { sendSuccess } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
@@ -10,7 +10,7 @@ router.use(authenticate);
 
 const t = (req: AuthRequest) => req.user!.tenantId;
 
-router.get('/stats', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/stats', requirePermission('inventory', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = t(req);
     const [totalPending, criticalItems, highPriorityItems, orderedToday, outOfStock, totalAlerts] = await Promise.all([
@@ -25,7 +25,7 @@ router.get('/stats', async (req: AuthRequest, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 });
 
-router.get('/alerts', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/alerts', requirePermission('inventory', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = t(req);
     const { acknowledged } = req.query as Record<string, string>;
@@ -37,14 +37,14 @@ router.get('/alerts', async (req: AuthRequest, res: Response, next: NextFunction
   } catch (err) { next(err); }
 });
 
-router.patch('/alerts/:id/acknowledge', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/alerts/:id/acknowledge', requirePermission('inventory', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await prisma.reorderAlert.update({ where: { id: req.params['id'] }, data: { isAcknowledged: true } });
     sendSuccess(res, null, 'Alert acknowledged');
   } catch (err) { next(err); }
 });
 
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/', requirePermission('inventory', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = t(req);
     const { priority, status } = req.query as Record<string, string>;
@@ -57,7 +57,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   } catch (err) { next(err); }
 });
 
-router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/:id', requirePermission('inventory', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const item = await prisma.reorderItem.update({ where: { id: req.params['id'] }, data: { ...req.body, updatedAt: new Date() } });
     sendSuccess(res, item);

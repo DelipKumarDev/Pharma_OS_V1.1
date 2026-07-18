@@ -1,40 +1,41 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import { prisma } from '../../config/database';
-import { sendSuccess, paginate } from '../../utils/response';
+import { sendSuccess, sendError, paginate } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
 import { NextFunction, Response } from 'express';
-import { TenantStatus, TenantType, TenantPlan } from '@prisma/client';
+import { TenantType, TenantPlan } from '@prisma/client';
 
 const router = Router();
 router.use(authenticate);
 
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+// A tenant may only ever see/modify its OWN organisation. Cross-tenant access
+// (listing or reading other pharmacies) is a platform-operator concern that does
+// not exist for regular tenant users — so every operation here is self-scoped.
+
+router.get('/', requirePermission('settings', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { search, status } = req.query as Record<string, string>;
-    const tenants = await prisma.tenant.findMany({
-      where: {
-        deletedAt: null,
-        ...(status ? { status: status as TenantStatus } : {}),
-        ...(search ? { OR: [{ name: { contains: search, mode: 'insensitive' } }, { slug: { contains: search } }] } : {}),
-      },
-      orderBy: { name: 'asc' },
-    });
-    sendSuccess(res, paginate(tenants, tenants.length, 1, 50));
+    const own = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId } });
+    const list = own && !own.deletedAt ? [own] : [];
+    sendSuccess(res, paginate(list, list.length, 1, 50));
   } catch (err) { next(err); }
 });
 
-router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/:id', requirePermission('settings', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (req.params['id'] !== req.user!.tenantId) { sendError(res, 'Not found', 404); return; }
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params['id'] } });
-    if (!tenant) { res.status(404).json({ success: false, message: 'Not found' }); return; }
+    if (!tenant) { sendError(res, 'Not found', 404); return; }
     sendSuccess(res, tenant);
   } catch (err) { next(err); }
 });
 
-router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Creating a new tenant is platform onboarding. Until a dedicated platform-admin
+// role exists, it is gated behind settings:edit (Pharma Admin only).
+router.post('/', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const body = req.body as Record<string, unknown>;
+    if (!body['name']) { sendError(res, 'Tenant name is required', 422); return; }
     const tenant = await prisma.tenant.create({
       data: {
         name: body['name'] as string,
@@ -57,15 +58,17 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
   } catch (err) { next(err); }
 });
 
-router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/:id', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (req.params['id'] !== req.user!.tenantId) { sendError(res, 'Not found', 404); return; }
     const tenant = await prisma.tenant.update({ where: { id: req.params['id'] }, data: req.body });
     sendSuccess(res, tenant, 'Tenant updated');
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.delete('/:id', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (req.params['id'] !== req.user!.tenantId) { sendError(res, 'Not found', 404); return; }
     await prisma.tenant.update({ where: { id: req.params['id'] }, data: { deletedAt: new Date(), status: 'suspended' } });
     sendSuccess(res, null, 'Tenant suspended');
   } catch (err) { next(err); }

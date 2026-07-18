@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import { prisma } from '../../config/database';
 import { sendSuccess } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
@@ -11,7 +11,7 @@ router.use(authenticate);
 
 // ─── GSTR-1 (outward supplies) ───────────────────────────────────────────────
 // GET /api/reports/gstr1?month=7&year=2026[&format=csv]
-router.get('/gstr1', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/gstr1', requirePermission('reports', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
     const month = parseInt((req.query['month'] as string) ?? '');
@@ -128,7 +128,7 @@ router.get('/gstr1', async (req: AuthRequest, res: Response, next: NextFunction)
 
 // ─── Sales report CSV export ─────────────────────────────────────────────────
 // GET /api/reports/export?days=30
-router.get('/export', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/export', requirePermission('reports', 'export'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
     const days = parseInt((req.query['days'] as string) ?? '30');
@@ -161,7 +161,7 @@ router.get('/export', async (req: AuthRequest, res: Response, next: NextFunction
   } catch (err) { next(err); }
 });
 
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = req.user!.tenantId;
     const { period, days: daysParam } = req.query as Record<string, string>;

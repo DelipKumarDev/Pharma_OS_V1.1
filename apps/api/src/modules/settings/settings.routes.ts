@@ -3,7 +3,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { MedicineCategory, MedicineForm, DrugSchedule } from '@prisma/client';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import { prisma } from '../../config/database';
 import { sendSuccess } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
@@ -44,7 +44,7 @@ function parseExpiryDate(v: string | undefined): Date | undefined {
   return isNaN(d.getTime()) ? undefined : d;
 }
 
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/', requirePermission('settings', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenant = await prisma.tenant.findUnique({ where: { id: t(req) } });
     if (!tenant) { res.status(404).json({ success: false, message: 'Tenant not found' }); return; }
@@ -80,7 +80,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   } catch (err) { next(err); }
 });
 
-router.patch('/:section', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.patch('/:section', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const section = req.params['section'];
     const body = req.body as Record<string, unknown>;
@@ -183,7 +183,7 @@ async function collectTenantData(tenantId: string) {
   return { medicines, inventory, customers, vendors, bills, prescriptions, returns };
 }
 
-router.post('/backup', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/backup', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const backupDir = path.resolve(process.env['BACKUP_DIR'] ?? 'backups');
     fs.mkdirSync(backupDir, { recursive: true });
@@ -224,7 +224,7 @@ router.post('/backup', async (req: AuthRequest, res: Response, next: NextFunctio
 
 // ─── Export — real CSV/JSON downloads ────────────────────────────────────────
 
-router.get('/export/:type', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/export/:type', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = t(req);
     const type = req.params['type'];
@@ -346,7 +346,7 @@ const VALID_CATEGORIES = Object.values(MedicineCategory) as string[];
 const VALID_FORMS = Object.values(MedicineForm) as string[];
 const VALID_SCHEDULES = Object.values(DrugSchedule) as string[];
 
-router.post('/import/:type', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/import/:type', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const tenantId = t(req);
     const type = req.params['type'];
@@ -491,7 +491,7 @@ router.post('/import/:type', async (req: AuthRequest, res: Response, next: NextF
   } catch (err) { next(err); }
 });
 
-router.get('/import/template/:type', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/import/template/:type', requirePermission('settings', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const templates: Record<string, { columns: string[]; rows: number }> = {
       medicines: { columns: ['Medicine Name', 'Generic Name', 'Manufacturer', 'Category', 'Dosage Form', 'Strength', 'Schedule', 'MRP', 'Selling Price', 'HSN Code', 'GST %'], rows: 3 },

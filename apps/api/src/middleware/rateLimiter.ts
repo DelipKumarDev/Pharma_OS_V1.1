@@ -18,9 +18,14 @@ export const apiLimiter = rateLimit({
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: config.AUTH_RATE_LIMIT_MAX,
+  // Only failed logins count toward the limit. Successful logins must never
+  // trip it, or pharmacies behind a single shared public IP (multiple staff on
+  // one counter terminal) get locked out during a normal morning. Per-account
+  // lockout after 5 failures (auth.service) remains the primary defense.
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res: Response) => {
-    sendError(res, 'Too many login attempts. Please try again in 15 minutes.', 429);
+    sendError(res, 'Too many failed login attempts from this network. Please try again in 15 minutes.', 429);
   },
 }) as unknown as RequestHandler;

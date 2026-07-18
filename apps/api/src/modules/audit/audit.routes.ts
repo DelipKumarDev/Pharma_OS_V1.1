@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../../middleware/authenticate';
+import { authenticate, requirePermission } from '../../middleware/authenticate';
 import { prisma } from '../../config/database';
 import { sendSuccess, paginate } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
@@ -8,6 +8,10 @@ import { Prisma, AuditModule, AuditAction, AuditSeverity } from '@prisma/client'
 
 const router = Router();
 router.use(authenticate);
+
+// The audit trail, sessions and security events are administrative oversight —
+// restricted to roles that can view settings (Pharma Admin).
+router.use(requirePermission('settings', 'view'));
 
 const t = (req: AuthRequest) => req.user!.tenantId;
 
