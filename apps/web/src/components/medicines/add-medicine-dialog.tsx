@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,7 +51,7 @@ const GST_RATES = [0, 5, 12, 18];
 
 async function saveMedicine(data: FormValues, id?: string): Promise<Medicine> {
   const payload = { ...data, schedule: (data.schedule === 'none' ? null : data.schedule) as DrugSchedule };
-  const res = await fetch(id ? `/api/medicines/${id}` : '/api/medicines', {
+  const res = await apiFetch(id ? `/api/medicines/${id}` : '/api/medicines', {
     method: id ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
