@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api';
 
 const REASONS = [
   'Physical stock count correction',
@@ -66,7 +67,7 @@ export function AdjustStockDialog({ item, open, onOpenChange }: Props) {
 
   const mutation = useMutation({
     mutationFn: async (data: FormValues) => {
-      const res = await fetch(`/api/inventory/${item!.id}/adjust`, {
+      const res = await apiFetch(`/api/inventory/${item!.id}/adjust`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adjustment: variance, physicalCount: data.physicalCount, reason: data.reason, notes: data.notes }),

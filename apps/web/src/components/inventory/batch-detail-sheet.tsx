@@ -7,6 +7,7 @@ import type { InventoryItem, MedicineBatch, StockMovement } from '@pharmaos/type
 import { formatCurrency, formatDate } from '@pharmaos/utils';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
+import { apiFetch } from '@/lib/api';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -18,13 +19,13 @@ interface Props {
 }
 
 async function fetchBatches(medicineId: string): Promise<MedicineBatch[]> {
-  const res = await fetch(`/api/inventory/batches/${medicineId}`);
+  const res = await apiFetch(`/api/inventory/batches/${medicineId}`);
   const json = await res.json() as { success: boolean; data: MedicineBatch[] };
   return json.data;
 }
 
 async function fetchMovements(medicineId: string): Promise<StockMovement[]> {
-  const res = await fetch(`/api/inventory/movements/${medicineId}`);
+  const res = await apiFetch(`/api/inventory/movements/${medicineId}`);
   const json = await res.json() as { success: boolean; data: StockMovement[] };
   return json.data;
 }

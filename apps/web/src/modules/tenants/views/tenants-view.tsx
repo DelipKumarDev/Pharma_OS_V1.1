@@ -8,13 +8,14 @@ import type { Tenant } from '@pharmaos/types';
 import { formatCurrency, formatDate } from '@pharmaos/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { apiFetch } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 async function fetchTenants(search: string): Promise<Tenant[]> {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
-  const res = await fetch(`/api/tenants?${params}`);
+  const res = await apiFetch(`/api/tenants?${params}`);
   const json = await res.json() as { success: boolean; data: { data: Tenant[] } };
   return json.data.data;
 }

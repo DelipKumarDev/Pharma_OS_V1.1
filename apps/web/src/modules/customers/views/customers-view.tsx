@@ -510,7 +510,7 @@ function CreditPaymentForm({ customer, onSuccess }: { customer: Customer; onSucc
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/customers/${customer.id}/payments`, {
+      const r = await apiFetch(`/api/customers/${customer.id}/payments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: Number(amount), paymentMode: payMode, referenceNumber: ref || undefined, paymentDate: new Date().toISOString() }),

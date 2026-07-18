@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { AddMedicineDialog } from '@/components/medicines/add-medicine-dialog';
+import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const CATEGORY_OPTIONS = ['all', 'antibiotic', 'analgesic', 'antacid', 'antihistamine', 'antifungal', 'antiviral', 'cardiovascular', 'diabetes', 'dermatology', 'gastroenterology', 'vitamins', 'respiratory', 'psychiatry', 'other'];
@@ -23,7 +24,7 @@ async function fetchMedicines(search: string, category: string): Promise<Medicin
   const params = new URLSearchParams({ limit: '100' });
   if (search) params.set('search', search);
   if (category && category !== 'all') params.set('category', category);
-  const res = await fetch(`/api/medicines?${params}`);
+  const res = await apiFetch(`/api/medicines?${params}`);
   const json = await res.json() as { success: boolean; data: { data: Medicine[] } };
   return json.data.data;
 }
@@ -67,7 +68,7 @@ export function MedicinesView() {
 
   const discontinueMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/medicines/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/medicines/${id}`, { method: 'DELETE' });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['medicines'] });
