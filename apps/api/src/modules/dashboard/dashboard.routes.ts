@@ -12,17 +12,11 @@ router.use(authenticate);
 // multiple terminals without stale-feeling data (frontend staleTime is 60s).
 const CACHE_TTL_MS = 30_000;
 const cache = new Map<string, { data: unknown; at: number }>();
+// Single-flight: concurrent cache-miss requests for the same tenant share one
+// computation instead of each running the heavy query (prevents cache stampede).
+const inflight = new Map<string, Promise<unknown>>();
 
-router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const tenantId = req.user!.tenantId;
-
-    const hit = cache.get(tenantId);
-    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-      sendSuccess(res, hit.data);
-      return;
-    }
-
+async function buildDashboard(tenantId: string): Promise<unknown> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today);
@@ -137,8 +131,27 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       alerts,
     };
 
-    cache.set(tenantId, { data, at: Date.now() });
-    sendSuccess(res, data);
+    return data;
+}
+
+router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const tenantId = req.user!.tenantId;
+
+    const hit = cache.get(tenantId);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+      sendSuccess(res, hit.data);
+      return;
+    }
+
+    let p = inflight.get(tenantId);
+    if (!p) {
+      p = buildDashboard(tenantId)
+        .then(data => { cache.set(tenantId, { data, at: Date.now() }); inflight.delete(tenantId); return data; })
+        .catch(err => { inflight.delete(tenantId); throw err; });
+      inflight.set(tenantId, p);
+    }
+    sendSuccess(res, await p);
   } catch (err) { next(err); }
 });
 

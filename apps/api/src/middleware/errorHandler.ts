@@ -28,6 +28,18 @@ export function errorHandler(
     return;
   }
 
+  // body-parser errors (malformed JSON, payload too large) carry their own HTTP
+  // status + a `type` tag. Honor it so a bad request body is a clean 4xx, not a 500.
+  const bp = err as Error & { type?: string; status?: number; statusCode?: number };
+  if (bp.type === 'entity.parse.failed') {
+    sendError(res, 'Malformed JSON in request body', 400);
+    return;
+  }
+  if (bp.type === 'entity.too.large') {
+    sendError(res, 'Request payload too large', 413);
+    return;
+  }
+
   if (err instanceof ZodError) {
     const errors: Record<string, string[]> = {};
     err.errors.forEach(e => {
