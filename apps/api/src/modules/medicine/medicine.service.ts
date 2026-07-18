@@ -84,9 +84,16 @@ export async function getMedicineByBarcode(tenantId: string, barcode: string) {
   return medicine;
 }
 
+// Reject HTML/script characters in free-text names — no legitimate medicine
+// name contains angle brackets, and it keeps stored data safe and clean.
+function assertSafeName(name: string) {
+  if (/[<>]/.test(name)) throw new AppError('Medicine name contains invalid characters (< or >)', 422);
+}
+
 export async function createMedicine(tenantId: string, input: CreateMedicineInput, userId: string, userName: string) {
   if (!input.name?.trim()) throw new AppError('Medicine name is required', 422);
   if (input.name.length > 150) throw new AppError('Medicine name must not exceed 150 characters', 422);
+  assertSafeName(input.name);
   if (input.mrp !== undefined && input.mrp < 0) throw new AppError('MRP cannot be negative', 422);
   if (input.sellingPrice !== undefined && input.sellingPrice < 0) throw new AppError('Selling price cannot be negative', 422);
   if (input.gstRate !== undefined && (input.gstRate < 0 || input.gstRate > 100)) throw new AppError('GST rate must be between 0 and 100', 422);
@@ -128,6 +135,12 @@ export async function updateMedicine(
   userName: string,
 ) {
   const existing = await getMedicineById(tenantId, id);
+
+  if (input.name !== undefined) {
+    if (!input.name.trim()) throw new AppError('Medicine name is required', 422);
+    if (input.name.length > 150) throw new AppError('Medicine name must not exceed 150 characters', 422);
+    assertSafeName(input.name);
+  }
 
   const medicine = await prisma.medicine.update({
     where: { id },
