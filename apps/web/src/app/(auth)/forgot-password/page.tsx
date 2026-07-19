@@ -137,6 +137,7 @@ function RequestOTPStep({
     formState: { errors, isSubmitting },
     setError,
   } = useForm<RequestValues>({
+    mode: 'onTouched',
     resolver: zodResolver(requestSchema),
   });
 
@@ -394,7 +395,7 @@ function NewPasswordStep({
     formState: { errors, isSubmitting },
     setError,
     watch,
-  } = useForm<ResetValues>({ resolver: zodResolver(resetSchema) });
+  } = useForm<ResetValues>({ mode: 'onTouched', resolver: zodResolver(resetSchema) });
 
   const watchedPassword = watch('password', '');
   useEffect(() => { setPasswordVal(watchedPassword); }, [watchedPassword]);

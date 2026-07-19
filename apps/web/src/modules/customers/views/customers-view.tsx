@@ -83,7 +83,7 @@ const DEFAULT_TYPE_INFO: TypeInfo = { label: 'Regular', variant: 'success', icon
 
 function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<CustomerFormValues>({ resolver: zodResolver(customerSchema) });
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CustomerFormValues>({ mode: 'onTouched', resolver: zodResolver(customerSchema) });
 
   const mutation = useMutation({
     mutationFn: (data: CustomerFormValues) => createCustomer(data as Record<string, unknown>),
@@ -116,6 +116,7 @@ function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             <div className="space-y-1">
               <Label>Email</Label>
               <Input {...register('email')} placeholder="email@example.com" type="email" />
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message || 'Enter a valid email'}</p>}
             </div>
             <div className="col-span-2 space-y-1">
               <Label>Address</Label>

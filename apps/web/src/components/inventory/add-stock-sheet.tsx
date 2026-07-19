@@ -65,6 +65,7 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
   });
 
   const { register, handleSubmit, setValue, reset, watch, formState: { errors } } = useForm<FormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(schema),
   });
 

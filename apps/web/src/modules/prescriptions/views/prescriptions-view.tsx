@@ -316,6 +316,7 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
 function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const { register, handleSubmit, reset, formState: { errors } } = useForm<AddFormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(addSchema),
     defaultValues: { prescriptionDate: new Date().toISOString().substring(0, 10) },
   });

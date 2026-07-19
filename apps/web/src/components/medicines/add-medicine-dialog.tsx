@@ -66,6 +66,7 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
   const qc = useQueryClient();
 
   const { register, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<FormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(schema),
     defaultValues: medicine
       ? { ...medicine, schedule: medicine.schedule ?? 'none', purchasePrice: medicine.purchasePrice ?? 0 }

@@ -82,7 +82,7 @@ type VendorFormValues = z.infer<typeof vendorSchema>;
 
 function AddVendorDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<VendorFormValues>({ resolver: zodResolver(vendorSchema) });
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<VendorFormValues>({ mode: 'onTouched', resolver: zodResolver(vendorSchema) });
 
   const mutation = useMutation({
     mutationFn: (data: VendorFormValues) => createVendor(data as Record<string, unknown>),
@@ -117,6 +117,7 @@ function AddVendorDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
             <div className="space-y-1">
               <Label>Email</Label>
               <Input {...register('email')} placeholder="orders@vendor.com" type="email" />
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message || 'Enter a valid email'}</p>}
             </div>
             <div className="space-y-1">
               <Label>GST Number</Label>
@@ -318,6 +319,7 @@ type PaymentFormValues = z.infer<typeof paymentSchema>;
 function RecordPaymentDialog({ vendor, open, onOpenChange }: { vendor: Vendor | null; open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const { register, handleSubmit, reset, formState: { errors } } = useForm<PaymentFormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(paymentSchema),
     defaultValues: { paymentMode: 'neft' },
   });

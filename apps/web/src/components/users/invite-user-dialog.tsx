@@ -54,6 +54,7 @@ export function InviteUserDialog({ open, onOpenChange }: Props) {
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<FormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(schema),
     defaultValues: { roleIds: [], sendInvite: true },
   });

@@ -50,6 +50,7 @@ export function AdjustStockDialog({ item, open, onOpenChange }: Props) {
   const medicineName = (item?.medicine as { name: string } | undefined)?.name ?? '';
 
   const { register, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<FormValues>({
+    mode: 'onTouched',
     resolver: zodResolver(schema),
     defaultValues: { physicalCount: systemQty, reason: '', notes: '' },
   });
