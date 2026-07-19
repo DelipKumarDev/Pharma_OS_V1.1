@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ScanLine, Sparkles } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -99,6 +99,50 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
   const gstRate = watch('gstRate');
   const requiresPrescription = watch('requiresPrescription');
 
+  // ── Scan a medicine strip/box photo → best-effort auto-fill (user reviews) ──
+  const [scanning, setScanning] = React.useState(false);
+  const scanFileRef = React.useRef<HTMLInputElement>(null);
+
+  const runScan = async (file: File) => {
+    setScanning(true);
+    try {
+      const Tesseract = (await import('tesseract.js')).default;
+      const { data } = await Tesseract.recognize(file, 'eng');
+      const text = (data.text ?? '').replace(/\r/g, '');
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+
+      let filled = 0;
+      const set = (field: keyof FormValues, val: string) => {
+        if (val && val.trim()) { setValue(field, val.trim() as never, { shouldValidate: true, shouldDirty: true }); filled++; }
+      };
+
+      // Strength: 500mg / 10 ml / 250 mcg / 1000 IU / 5%
+      const strength = text.match(/(\d+(?:\.\d+)?)\s?(mg|ml|mcg|gm?|iu|%)\b/i)?.[0];
+      if (strength) set('strength', strength.replace(/\s+/g, ''));
+
+      // Name / brand: first prominent alphabetic line that isn't boilerplate
+      const skip = /each|contains|tablet|capsule|store|keep|mfd|mfg|manufactured|marketed|batch|exp|mrp|b\.?no|lic|dosage|read|prescription|schedule/i;
+      const nameLine = lines.find(l => /[A-Za-z]{3,}/.test(l) && !skip.test(l) && l.length <= 40);
+      if (nameLine) { set('name', strength && !new RegExp(strength, 'i').test(nameLine) ? `${nameLine} ${strength}` : nameLine); set('brandName', nameLine); }
+
+      // Composition / generic: "Each ... contains X" or a salt-looking line
+      const comp = text.match(/contains?[:\s]+([A-Za-z0-9 ,.\-()]+)/i)?.[1];
+      if (comp) { set('composition', comp); const salt = comp.match(/[A-Za-z]{4,}/)?.[0]; if (salt) set('genericName', salt); }
+
+      // Manufacturer: "Mfd by: X" / "Marketed by X" / a line ending in Ltd/Pharma/Labs
+      const mfg = text.match(/(?:mfd|mfg|manufactured|marketed)\s*(?:by)?[:.\s]+([A-Za-z0-9 .,&\-()]+)/i)?.[1]
+        || lines.find(l => /\b(ltd|limited|pharma|labs?|laboratories|healthcare|remedies)\b/i.test(l));
+      if (mfg) set('manufacturer', mfg.replace(/[.,]\s*$/, ''));
+
+      if (filled > 0) toast.success(`Scanned ${filled} field(s). Please review and complete the rest before saving.`);
+      else toast.warning('Could not read details clearly — please enter them manually.');
+    } catch {
+      toast.error('Could not read the photo. Enter the details manually.');
+    } finally {
+      setScanning(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -110,6 +154,21 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
         </DialogHeader>
 
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
+          {!isEdit && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span><span className="font-medium">Scan a medicine strip/box</span> to auto-fill — then review.</span>
+              </div>
+              <Button type="button" variant="outline" size="sm" className="gap-1 shrink-0" disabled={scanning}
+                onClick={() => scanFileRef.current?.click()}>
+                {scanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
+                {scanning ? 'Reading…' : 'Scan photo'}
+              </Button>
+              <input ref={scanFileRef} type="file" accept="image/*" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) runScan(f); e.target.value = ''; }} />
+            </div>
+          )}
           {/* Basic info */}
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1">
