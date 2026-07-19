@@ -12,6 +12,7 @@ import { authenticate } from './middleware/authenticate';
 import type { AuthRequest } from './middleware/authenticate';
 import { sendSuccess } from './utils/response';
 import { sendSms } from './utils/sms';
+import { resolveTemplates, renderTemplate } from './utils/template';
 import * as vendorService from './modules/vendor/vendor.service';
 
 // Route imports
@@ -115,11 +116,15 @@ app.post('/api/refills/:id/remind', authenticate, async (req: AuthRequest, res: 
     if (!reminder) { res.status(404).json({ success: false, message: 'Refill reminder not found' }); return; }
     if (!reminder.phone) { res.status(400).json({ success: false, message: 'Customer has no phone number on file' }); return; }
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId }, select: { name: true } });
-    const sent = await sendSms(
-      reminder.phone,
-      `${tenant?.name ?? 'Your pharmacy'}: Hi ${reminder.customerName}, your ${reminder.medicine} refill is due${reminder.daysOverdue > 0 ? ` (${reminder.daysOverdue} days overdue)` : ''}. Visit us to restock. Thank you!`,
-    );
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId }, select: { name: true, messageTemplates: true } });
+    const templates = resolveTemplates(tenant?.messageTemplates);
+    const message = renderTemplate(templates.refillReminder, {
+      customerName: reminder.customerName,
+      medicine: reminder.medicine,
+      overdue: reminder.daysOverdue > 0 ? ` (${reminder.daysOverdue} days overdue)` : '',
+      pharmacyName: tenant?.name ?? 'Your pharmacy',
+    });
+    const sent = await sendSms(reminder.phone, message);
     sendSuccess(res, { delivered: sent }, sent ? 'Reminder sent via SMS' : 'Reminder queued (SMS provider not configured — logged to console)');
   } catch (err) { next(err); }
 });

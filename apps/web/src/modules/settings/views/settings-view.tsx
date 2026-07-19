@@ -10,6 +10,7 @@ import {
   Package, Pill, Receipt, Banknote, Smartphone, BookOpen,
   ChevronRight, Info, Mail, MessageCircle, PhoneCall,
   FormInput, ShieldCheck, UserCog, Shield, ClipboardList, ExternalLink,
+  MessageSquare, Plus,
 } from 'lucide-react';
 import Link from 'next/link';
 import { FormFieldsSection } from '../components/form-fields-section';
@@ -33,6 +34,7 @@ type SettingsData = {
   tax: { enableGST: boolean; gstRegistered: boolean; defaultGST: number; gstSlabs: Array<{ rate: number; category: string; examples: string }> };
   billing: Record<string, unknown>;
   notifications: Record<string, boolean | string>;
+  templates?: { values: Record<string, string>; variables: Record<string, string[]> };
 };
 
 async function fetchSettings(): Promise<SettingsData> {
@@ -645,6 +647,87 @@ function ImportSection() {
   );
 }
 
+const TEMPLATE_META: { key: string; label: string; channel: string; hint: string }[] = [
+  { key: 'refillReminder', label: 'Refill Reminder', channel: 'WhatsApp / SMS', hint: 'Sent to a customer when their medicine is due for a refill.' },
+  { key: 'paymentDue', label: 'Payment Due', channel: 'WhatsApp / SMS', hint: 'Sent to a customer with a pending credit balance.' },
+  { key: 'lowStockAlert', label: 'Low Stock Alert', channel: 'SMS to you', hint: 'Sent to your alert number when items run low.' },
+  { key: 'expiryAlert', label: 'Expiry Alert', channel: 'SMS to you', hint: 'Sent to your alert number for near-expiry batches.' },
+];
+
+function fillPreview(tpl: string): string {
+  const sample: Record<string, string> = {
+    customerName: 'Ramesh', medicine: 'Paracetamol 500mg', overdue: ' (3 days overdue)',
+    pharmacyName: 'Divya Pharmacy', amount: '450', count: '4', days: '90',
+  };
+  return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k: string) => sample[k] ?? `{{${k}}}`).replace(/\s{2,}/g, ' ').trim();
+}
+
+function TemplatesSection({ data, onSave }: { data: SettingsData; onSave: (s: string, d: Record<string, unknown>) => Promise<void> }) {
+  const initial = data.templates?.values ?? {};
+  const variables = data.templates?.variables ?? {};
+  const [form, setForm] = useState<Record<string, string>>({ ...initial });
+  const [saving, setSaving] = useState(false);
+
+  function insertVar(key: string, v: string) {
+    setForm((p) => ({ ...p, [key]: `${p[key] ?? ''}{{${v}}}` }));
+  }
+
+  async function save() {
+    setSaving(true);
+    await onSave('templates', { values: form });
+    setSaving(false);
+    toast.success('Message templates saved');
+  }
+
+  return (
+    <div>
+      <SectionHeader
+        title="Message Templates"
+        description="Customize the wording of automated messages. Use {{variables}} — they are filled in automatically when a message is sent."
+        action={<Button size="sm" onClick={save} disabled={saving} className="gap-1">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save</Button>}
+      />
+      <div className="space-y-5">
+        {TEMPLATE_META.map(({ key, label, channel, hint }) => {
+          const value = form[key] ?? initial[key] ?? '';
+          const vars = variables[key] ?? [];
+          return (
+            <div key={key} className="rounded-xl border border-border p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">{label}</p>
+                  <p className="text-2xs text-muted-foreground">{hint}</p>
+                </div>
+                <Badge variant="secondary" className="gap-1 text-2xs"><MessageCircle className="h-3 w-3" /> {channel}</Badge>
+              </div>
+              <textarea
+                value={value}
+                onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value.slice(0, 500) }))}
+                rows={3}
+                className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                placeholder="Message text…"
+              />
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-2xs text-muted-foreground mr-1">Insert:</span>
+                {vars.map((v) => (
+                  <button key={v} type="button" onClick={() => insertVar(key, v)}
+                    className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary hover:bg-primary/20">
+                    <Plus className="h-2.5 w-2.5" />{v}
+                  </button>
+                ))}
+                <span className="ml-auto text-2xs text-muted-foreground">{value.length}/500</span>
+              </div>
+              <div className="rounded-lg bg-muted/60 px-3 py-2">
+                <p className="text-2xs font-medium text-muted-foreground mb-0.5">Preview</p>
+                <p className="text-xs">{fillPreview(value) || <span className="text-muted-foreground italic">Empty</span>}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function NotificationsSection({ data, onSave }: { data: SettingsData; onSave: (s: string, d: Record<string, unknown>) => Promise<void> }) {
   const [form, setForm] = useState({ ...data.notifications });
   const [saving, setSaving] = useState(false);
@@ -791,6 +874,7 @@ const SECTIONS = [
   { id: 'tax',            label: 'Tax & Billing',    icon: CreditCard,   description: 'GST, payment methods, receipts' },
   { id: 'import',         label: 'Import & Export',  icon: Upload,       description: 'Migration, bulk import, backup' },
   { id: 'notifications',  label: 'Notifications',    icon: Bell,         description: 'Alerts and report preferences' },
+  { id: 'templates',      label: 'Message Templates', icon: MessageSquare, description: 'Notification & WhatsApp/SMS wording' },
   { id: 'system',         label: 'System',           icon: Settings2,    description: 'Localization, thresholds, backup' },
   { id: 'form-fields',    label: 'Form Fields',      icon: FormInput,    description: 'Add, rename or disable fields' },
   { id: 'access-control', label: 'Access Control',   icon: ShieldCheck,  description: 'Menu & tab visibility per role' },
@@ -895,6 +979,7 @@ export function SettingsView() {
             {activeSection === 'tax'            && <TaxSection data={data} onSave={onSave} />}
             {activeSection === 'import'         && <ImportSection />}
             {activeSection === 'notifications'  && <NotificationsSection data={data} onSave={onSave} />}
+            {activeSection === 'templates'      && <TemplatesSection data={data} onSave={onSave} />}
             {activeSection === 'system'         && <SystemSection data={data} onSave={onSave} />}
             {activeSection === 'form-fields'    && <FormFieldsSection />}
             {activeSection === 'access-control' && <AccessControlSection />}

@@ -429,6 +429,9 @@ model Tenant {
   alertEmail          String?
   alertPhone          String?
 
+  // Admin-configurable message templates ({{variable}} placeholders), per tenant
+  messageTemplates    Json?
+
   // Relations
   users               User[]
   roles               Role[]

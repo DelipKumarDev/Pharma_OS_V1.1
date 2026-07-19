@@ -10,6 +10,7 @@ import { AuthRequest } from '../../middleware/authenticate';
 import { NextFunction, Response } from 'express';
 import { toCsv, sendCsv } from '../../utils/csv';
 import { logger } from '../../utils/logger';
+import { resolveTemplates, TEMPLATE_VARIABLES, MessageTemplates } from '../../utils/template';
 
 const router = Router();
 router.use(authenticate);
@@ -76,6 +77,10 @@ router.get('/', requirePermission('settings', 'view'), async (req: AuthRequest, 
         emailAlerts: tenant.emailAlerts, smsAlerts: tenant.smsAlerts,
         whatsappAlerts: tenant.whatsappAlerts, alertEmail: tenant.alertEmail, alertPhone: tenant.alertPhone,
       },
+      templates: {
+        values: resolveTemplates(tenant.messageTemplates),
+        variables: TEMPLATE_VARIABLES,
+      },
     });
   } catch (err) { next(err); }
 });
@@ -141,6 +146,20 @@ router.patch('/:section', requirePermission('settings', 'edit'), async (req: Aut
         alertPhone: body['alertPhone'],
       },
     };
+
+    // Message templates are stored in a single JSON column, merged over what exists.
+    if (section === 'templates') {
+      const current = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { messageTemplates: true } });
+      const existing = (current?.messageTemplates && typeof current.messageTemplates === 'object') ? current.messageTemplates as Record<string, unknown> : {};
+      const incoming = (body['values'] ?? body) as Partial<MessageTemplates>;
+      const keys: (keyof MessageTemplates)[] = ['refillReminder', 'lowStockAlert', 'expiryAlert', 'paymentDue'];
+      const merged: Record<string, string> = {};
+      for (const [k, v] of Object.entries(existing)) if (typeof v === 'string') merged[k] = v;
+      for (const k of keys) if (typeof incoming[k] === 'string') merged[k] = (incoming[k] as string).slice(0, 500);
+      const updated = await prisma.tenant.update({ where: { id: tenantId }, data: { messageTemplates: merged } });
+      sendSuccess(res, { section, updated: true, tenantId: updated.id, templates: merged }, 'Message templates updated');
+      return;
+    }
 
     const updateData = sectionMap[section ?? ''] ?? body;
     const filtered = Object.fromEntries(Object.entries(updateData).filter(([, v]) => v !== undefined));
