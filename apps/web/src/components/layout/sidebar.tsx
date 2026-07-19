@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Package, Receipt, FileText, Users, BarChart3,
   Settings2, ChevronLeft, ChevronRight, LogOut, HelpCircle, Zap, Pill,
-  RotateCcw, RefreshCw, CalendarX2, UserCog, Shield, ClipboardList, ShieldAlert,
+  RotateCcw, RefreshCw, CalendarX2, UserCog, Shield, ClipboardList, ShieldAlert, ScanLine,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -88,6 +88,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Returns',           href: '/returns',      icon: RotateCcw },
   { label: 'Prescriptions',     href: '/prescriptions', icon: FileText },
   { label: 'Stock & Inventory', href: '/stock',        icon: Package },
+  { label: 'Scan Bill',         href: '/scan',         icon: ScanLine },
   { label: 'Medicine Master',   href: '/medicines',    icon: Pill },
   { label: 'Reorder Queue',     href: '/reorder',      icon: RefreshCw },
   { label: 'Expiry Monitor',    href: '/expiry',       icon: CalendarX2 },
