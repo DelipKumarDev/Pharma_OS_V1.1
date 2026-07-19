@@ -34,6 +34,7 @@ import settingsRoutes from './modules/settings/settings.routes';
 import reportsRoutes from './modules/reports/reports.routes';
 import tenantRoutes from './modules/tenant/tenant.routes';
 import scheduleRegisterRoutes from './modules/schedule-register/scheduleRegister.routes';
+import searchRoutes from './modules/search/search.routes';
 
 const app = express();
 
@@ -82,6 +83,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/schedule-register', scheduleRegisterRoutes);
+app.use('/api/search', searchRoutes);
 
 // Vendor payments
 app.post('/api/vendor-payments', authenticate, async (req: AuthRequest, res: Response, next: NextFunction) => {
