@@ -223,6 +223,12 @@ function ProfileSection({ data, onSave }: { data: SettingsData; onSave: (section
         <FieldRow label="Email">
           <Input value={String(form.email ?? '')} onChange={(e) => set('email', e.target.value)} className="h-8 text-sm" type="email" />
         </FieldRow>
+        <FieldRow label="Support Contact">
+          <div className="space-y-1">
+            <Input value={String(form.supportContact ?? '')} onChange={(e) => set('supportContact', e.target.value)} className="h-8 text-sm" placeholder="support@yourpharmacy.in  or  https://help-desk-url" />
+            <p className="text-2xs text-muted-foreground">Shown in the in-app Help assistant's "Contact support" link. An email opens a pre-filled message; a URL opens your help desk.</p>
+          </div>
+        </FieldRow>
       </div>
 
       <SaveBar onSave={save} saving={saving} />

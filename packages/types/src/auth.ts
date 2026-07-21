@@ -27,6 +27,7 @@ export interface AuthUser {
   tenantId: ID;
   tenantName: string;
   tenantSlug: string;
+  supportContact?: string;
   roles: string[];
   permissions: string[];
   mfaEnabled: boolean;

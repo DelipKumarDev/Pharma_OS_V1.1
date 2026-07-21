@@ -55,7 +55,7 @@ router.get('/', requirePermission('settings', 'view'), async (req: AuthRequest, 
         licenseNumber: tenant.licenseNumber, drugLicenseNumber: tenant.drugLicenseNumber,
         gstNumber: tenant.gstNumber, address: tenant.addressLine1, city: tenant.city,
         state: tenant.state, pincode: tenant.pincode, phone: '', mobile: '', email: tenant.email ?? '',
-        website: '', logoUrl: tenant.logoUrl,
+        website: '', logoUrl: tenant.logoUrl, supportContact: tenant.supportContact ?? '',
       },
       system: {
         timezone: tenant.timezone, dateFormat: tenant.dateFormat, currency: tenant.currency,
@@ -103,6 +103,7 @@ router.patch('/:section', requirePermission('settings', 'edit'), async (req: Aut
         licenseNumber: body['licenseNumber'],
         drugLicenseNumber: body['drugLicenseNumber'],
         gstNumber: body['gstNumber'],
+        supportContact: body['supportContact'],
       },
       system: {
         timezone: body['timezone'],

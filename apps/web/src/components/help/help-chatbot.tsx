@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { KB, searchKb, type KbArticle } from './knowledge-base';
 import { useAuthStore } from '@/store/auth-store';
 
-const SUPPORT_EMAIL = 'support@pharmaos.in';
+const DEFAULT_SUPPORT = 'support@pharmaos.in';
 
 interface Msg {
   id: number;
@@ -56,9 +56,14 @@ export function HelpChatbot() {
   }
 
   const supportHref = () => {
+    const contact = (user?.supportContact ?? '').trim() || DEFAULT_SUPPORT;
+    // A configured URL (ticket form / help desk) is linked directly; otherwise
+    // treat it as an email and open a pre-filled mailto.
+    if (/^https?:\/\//i.test(contact)) return contact;
+    const email = contact.replace(/^mailto:/i, '');
     const subject = encodeURIComponent('PharmaOS support request');
     const body = encodeURIComponent(`Pharmacy: ${user?.tenantName ?? ''}\nUser: ${user?.name ?? ''} (${user?.email ?? ''})\n\nMy question:\n`);
-    return `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+    return `mailto:${email}?subject=${subject}&body=${body}`;
   };
 
   // Launcher

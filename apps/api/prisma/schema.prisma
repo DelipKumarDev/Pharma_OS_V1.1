@@ -432,6 +432,9 @@ model Tenant {
   // Admin-configurable message templates ({{variable}} placeholders), per tenant
   messageTemplates    Json?
 
+  // Support contact shown in the in-app help assistant (email or ticket URL)
+  supportContact      String?
+
   // Relations
   users               User[]
   roles               Role[]

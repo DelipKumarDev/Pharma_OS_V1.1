@@ -26,26 +26,105 @@ const emptyRow = (): Row => ({ medicineName: '', genericName: '', batchNumber: '
 
 type Stage = 'upload' | 'processing' | 'review' | 'done';
 
+// Convert a "MM/YY" or "MM/YYYY" expiry to an ISO date (last day of the month).
+function expiryToIso(mmYY: string): string {
+  const m = mmYY.match(/^(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (!m) return '';
+  const month = Math.min(12, Math.max(1, parseInt(m[1]!, 10)));
+  let year = parseInt(m[2]!, 10);
+  if (year < 100) year += 2000;
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
+// Token-aware parse of a pharmacy purchase bill. Each product row typically has
+// (rack) description qty (free) pack BATCH exp/date prices... GST HSN. We classify
+// tokens by shape rather than position so it works across bill layouts. Everything
+// is reviewed by the user before commit.
+const FORM_WORDS = /^(tab|tabs|cap|caps|syp|syrup|susp|sus;|inj|cream|gel|drops|spray|soln|sol|lotion|oint|powder|sachet|kit|ml|mg|mcg|gm|iu|s|nos)$/i;
+
+function parseItemRow(line: string): Row | null {
+  // ignore obvious non-product lines
+  if (/^(rack|description|qty|free|pack|batch|hsn|total|tax\b|taxable|invoice|gst|sgst|cgst|igst|amount|sale value|grand|round|net value|new mrp|old mrp|trade|disc|scm|prep|checked|s\.?no)/i.test(line)) return null;
+
+  const tokens = line.split(/\s+/).filter(Boolean);
+  if (tokens.length < 4) return null;
+
+  // leading rack code, e.g. "G0569" — a letter followed by digits, not a batch
+  const rack = /^[A-Za-z]\d{2,}$/.test(tokens[0]!) ? tokens[0]! : null;
+  // expiry MM/YY (strong signal of a product row)
+  const expiryTok = tokens.find(t => /^(0?[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(t));
+  // HSN: the LAST 6–8 digit pure integer in the row (batches can also be numeric)
+  const hsnTok = [...tokens].reverse().find(t => /^\d{6,8}$/.test(t));
+  // batch: letter+digit, length >=5, not the rack code / a pack unit / form word / date / HSN
+  const batchTok = tokens.find(t =>
+    t !== rack && /[A-Za-z]/.test(t) && /\d/.test(t) &&
+    t.replace(/[^A-Za-z0-9]/g, '').length >= 5 && !/\//.test(t) &&
+    !/^\d+('?s|ml|md|gm|mg|mcg|iu|gr|cc|kg)$/i.test(t) &&
+    !FORM_WORDS.test(t) && t !== hsnTok);
+  // all 2-decimal money values, in order
+  const decimals = tokens.filter(t => /^\d+\.\d{2}$/.test(t)).map(t => parseFloat(t));
+
+  // A product row needs an expiry or (a batch + a price)
+  if (!expiryTok && !(batchTok && decimals.length)) return null;
+
+  // medicine name: leading alphabetic-ish tokens, after an optional rack code
+  const nameTokens: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tk = tokens[i]!;
+    if (i === 0 && rack) continue;                              // skip rack code e.g. G0569
+    if (tk === batchTok || tk === expiryTok) break;
+    if (/^\d+$/.test(tk) || /'/.test(tk) || /^\d+\.\d{2}$/.test(tk)) break; // qty / pack (15'S) / price (keep strength like 10MG)
+    if (/[A-Za-z]/.test(tk)) nameTokens.push(tk); else break;
+  }
+  const medicineName = nameTokens.join(' ').replace(/\s+/g, ' ').trim();
+  if (medicineName.length < 3) return null;
+
+  // quantity: first small integer after the name, before the batch
+  const nameEnd = tokens.indexOf(nameTokens[nameTokens.length - 1] ?? '') + 1;
+  const batchIdx = batchTok ? tokens.indexOf(batchTok) : (expiryTok ? tokens.indexOf(expiryTok) : tokens.length);
+  let quantity = '';
+  for (let i = Math.max(0, nameEnd); i < batchIdx; i++) {
+    if (/^\d{1,4}$/.test(tokens[i]!)) { quantity = tokens[i]!; break; }
+  }
+
+  // prices: first two non-zero 2-decimals after the expiry (NEW MRP, TRADE PRICE)
+  const expIdx = expiryTok ? tokens.indexOf(expiryTok) : -1;
+  const afterExp = tokens.slice(expIdx + 1).filter(t => /^\d+\.\d{2}$/.test(t)).map(parseFloat).filter(n => n > 0);
+  const pricesPool = (afterExp.length ? afterExp : decimals.filter(n => n > 0));
+  const mrp = pricesPool[0] ?? '';
+  const purchase = pricesPool[1] ?? '';
+
+  // GST %: a standalone 0/5/12/18/28 token (not part of a decimal)
+  const gstTok = [...tokens].reverse().find(t => /^(0|5|12|18|28)$/.test(t) && t !== hsnTok);
+
+  const r = emptyRow();
+  r.medicineName = medicineName;
+  r.batchNumber = batchTok ?? '';
+  r.expiryDate = expiryTok ? expiryToIso(expiryTok) : '';
+  r.quantity = quantity;
+  r.mrp = mrp === '' ? '' : String(mrp);
+  r.purchasePrice = purchase === '' ? '' : String(purchase);
+  r.sellingPrice = mrp === '' ? '' : String(mrp);
+  r.gstRate = gstTok ?? '12';
+  return r;
+}
+
 // Best-effort parse of raw OCR text into candidate line items. Deliberately
 // permissive — the user reviews and corrects everything before committing.
 function parseOcr(text: string): { vendor: string; rows: Row[] } {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const vendor = lines[0] ?? '';
+  // vendor = the most prominent line near the top (longest alphabetic line in the first 6)
+  const vendor = [...lines.slice(0, 6)]
+    .filter(l => /[A-Za-z]{4,}/.test(l) && !/invoice|tax|gst|date|bill|no\.?\b/i.test(l))
+    .sort((a, b) => b.replace(/[^A-Za-z]/g, '').length - a.replace(/[^A-Za-z]/g, '').length)[0] ?? lines[0] ?? '';
+
   const rows: Row[] = [];
   for (const line of lines) {
-    // a plausible item line has a word-y start and at least two numbers (qty + price)
-    const nums = line.match(/\d+(?:\.\d+)?/g);
-    const name = line.replace(/[\d.,%₹|]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (name.length >= 3 && nums && nums.length >= 2 && !/gst|total|invoice|bill|tax|amount|qty|rate/i.test(name)) {
-      const r = emptyRow();
-      r.medicineName = name;
-      r.quantity = nums[0] ?? '';
-      r.purchasePrice = nums[1] ?? '';
-      r.mrp = nums[2] ?? '';
-      rows.push(r);
-    }
+    const r = parseItemRow(line);
+    if (r) rows.push(r);
   }
-  return { vendor, rows: rows.slice(0, 30) };
+  return { vendor: vendor.trim(), rows: rows.slice(0, 40) };
 }
 
 export function ScanBillView() {
