@@ -1,8 +1,7 @@
-import type { Metadata } from 'next';
-import { InventoryView } from '@/modules/inventory/views/inventory-view';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = { title: 'Inventory' };
-
+// /inventory was an unlinked duplicate of the canonical "Stock & Inventory"
+// page (/stock). Redirect so any old link resolves there instead of a dead end.
 export default function InventoryPage() {
-  return <InventoryView />;
+  redirect('/stock');
 }

@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   Eye, EyeOff, Lock, User, AlertTriangle, Shield, Pill, Users, CreditCard,
-  MessageSquare, Phone, Mail, ExternalLink, ChevronRight, HelpCircle,
+  Phone, Mail, ExternalLink, ChevronRight, HelpCircle,
   Loader2, ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -77,16 +77,10 @@ function SupportCenterDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const options = [
-    {
-      icon: MessageSquare,
-      iconBg: 'bg-emerald-100 dark:bg-emerald-950',
-      iconCls: 'text-emerald-600',
-      label: 'Live Chat',
-      desc: 'Connect instantly with our support team',
-      badge: 'Soon' as const,
-      onClick: () => toast.info('Live chat is coming soon — our team is integrating chatbot support.'),
-    },
+  const options: {
+    icon: typeof Phone; iconBg: string; iconCls: string; label: string; desc: string;
+    href?: string; onClick?: () => void; badge?: string;
+  }[] = [
     {
       icon: Phone,
       iconBg: 'bg-blue-100 dark:bg-blue-950',

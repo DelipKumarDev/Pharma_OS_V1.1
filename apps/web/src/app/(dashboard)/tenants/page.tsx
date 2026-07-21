@@ -1,7 +1,8 @@
-import { TenantsView } from '@/modules/tenants/views/tenants-view';
+import { redirect } from 'next/navigation';
 
-export const metadata = { title: 'Tenants — PharmaOS' };
-
+// /tenants was an unlinked super-admin page. Tenant routes are now self-scoped,
+// so managing "your pharmacy" belongs in Settings → Profile. Redirect there
+// instead of leaving an orphan page.
 export default function TenantsPage() {
-  return <TenantsView />;
+  redirect('/settings');
 }
