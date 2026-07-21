@@ -50,8 +50,9 @@ function parseItemRow(line: string): Row | null {
   const tokens = line.split(/\s+/).filter(Boolean);
   if (tokens.length < 4) return null;
 
-  // leading rack code, e.g. "G0569" — a letter followed by digits, not a batch
-  const rack = /^[A-Za-z]\d{2,}$/.test(tokens[0]!) ? tokens[0]! : null;
+  // leading rack code, e.g. "G0569" (1–3 letters then digits). Tolerant of OCR
+  // mangling a leading "0" into an "O" (G0569 → GO569), so accept up to 3 letters.
+  const rack = /^[A-Za-z]{1,3}\d{2,}[A-Za-z]?$/.test(tokens[0]!) ? tokens[0]! : null;
   // expiry MM/YY (strong signal of a product row)
   const expiryTok = tokens.find(t => /^(0?[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(t));
   // HSN: the LAST 6–8 digit pure integer in the row (batches can also be numeric)
@@ -96,7 +97,8 @@ function parseItemRow(line: string): Row | null {
   const purchase = pricesPool[1] ?? '';
 
   // GST %: a standalone 0/5/12/18/28 token (not part of a decimal)
-  const gstTok = [...tokens].reverse().find(t => /^(0|5|12|18|28)$/.test(t) && t !== hsnTok);
+  const gstRaw = [...tokens].reverse().find(t => /^(0|5|12|18|28)s?$/i.test(t) && t !== hsnTok);
+  const gstTok = gstRaw ? gstRaw.replace(/s$/i, '') : undefined;
 
   const r = emptyRow();
   r.medicineName = medicineName;
@@ -113,10 +115,15 @@ function parseItemRow(line: string): Row | null {
 // Best-effort parse of raw OCR text into candidate line items. Deliberately
 // permissive — the user reviews and corrects everything before committing.
 function parseOcr(text: string): { vendor: string; rows: Row[] } {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  // vendor = the most prominent line near the top (longest alphabetic line in the first 6)
-  const vendor = [...lines.slice(0, 6)]
-    .filter(l => /[A-Za-z]{4,}/.test(l) && !/invoice|tax|gst|date|bill|no\.?\b/i.test(l))
+  // Normalise table artifacts: Tesseract renders column borders as | [ ] { }.
+  const lines = text.split('\n')
+    .map(l => l.replace(/[|\[\]{}]+/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  // vendor = the most prominent NON-data line near the top (longest alphabetic
+  // line in the first 8, excluding item rows and label lines)
+  const looksLikeItemRow = (l: string) => /\b(0?[1-9]|1[0-2])\/(\d{2}|\d{4})\b/.test(l) || (l.match(/\d+\.\d{2}/g) || []).length >= 2 || /\b\d{8}\b/.test(l);
+  const vendor = [...lines.slice(0, 8)]
+    .filter(l => /[A-Za-z]{4,}/.test(l) && !looksLikeItemRow(l) && !/invoice|tax|gst|date|bill|no\.?\b|mobile|phone|email|address/i.test(l))
     .sort((a, b) => b.replace(/[^A-Za-z]/g, '').length - a.replace(/[^A-Za-z]/g, '').length)[0] ?? lines[0] ?? '';
 
   const rows: Row[] = [];
@@ -125,6 +132,57 @@ function parseOcr(text: string): { vendor: string; rows: Row[] } {
     if (r) rows.push(r);
   }
   return { vendor: vendor.trim(), rows: rows.slice(0, 40) };
+}
+
+// Preprocess a bill photo for OCR: upscale small images, convert to grayscale,
+// then binarize (black/white) using an Otsu threshold. This removes the blue
+// scan tint and background noise so Tesseract sees crisp text — a big accuracy
+// win on photographed/scanned bills, with no API key.
+async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = URL.createObjectURL(file);
+  });
+
+  const targetW = Math.min(2800, Math.max(img.width, 2000)); // upscale toward ~2000-2800px wide
+  const scale = targetW / img.width;
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const d = imageData.data;
+  const total = w * h;
+  const gray = new Uint8Array(total);
+  const hist = new Array(256).fill(0);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const g = (d[i]! * 0.299 + d[i + 1]! * 0.587 + d[i + 2]! * 0.114) | 0;
+    gray[p] = g; hist[g]++;
+  }
+  // Otsu's method → optimal global threshold
+  let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (wB === 0) continue;
+    const wF = total - wB; if (wF === 0) break;
+    sumB += t * hist[t];
+    const between = wB * wF * ((sumB / wB) - ((sum - sumB) / wF)) ** 2;
+    if (between > maxVar) { maxVar = between; threshold = t; }
+  }
+  const thr = threshold + 8; // slight bias keeps thin strokes (fine digits)
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const v = gray[p]! > thr ? 255 : 0;
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 export function ScanBillView() {
@@ -146,12 +204,23 @@ export function ScanBillView() {
     setProgress(0);
     setPreviewUrl(URL.createObjectURL(file));
     try {
-      const Tesseract = (await import('tesseract.js')).default;
-      const { data } = await Tesseract.recognize(file, 'eng', {
+      const { createWorker, PSM } = await import('tesseract.js');
+      // Preprocess for legibility (upscale + binarize), then OCR with a
+      // uniform-block segmentation mode that keeps each table row on one line.
+      let source: HTMLCanvasElement | File = file;
+      try { source = await preprocessImage(file); } catch { /* fall back to raw file */ }
+
+      const worker = await createWorker('eng', 1, {
         logger: (m: { status: string; progress: number }) => {
           if (m.status === 'recognizing text') setProgress(Math.round(m.progress * 100));
         },
       });
+      await worker.setParameters({
+        tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+        preserve_interword_spaces: '1',
+      });
+      const { data } = await worker.recognize(source);
+      await worker.terminate();
       const text = data.text ?? '';
       setRawText(text);
       const parsed = parseOcr(text);
