@@ -47,7 +47,8 @@ interface Props {
 export function AdjustStockDialog({ item, open, onOpenChange }: Props) {
   const qc = useQueryClient();
   const systemQty = item?.availableQuantity ?? 0;
-  const medicineName = (item?.medicine as { name: string } | undefined)?.name ?? '';
+  const medicineName = (item as (InventoryItem & { medicineName?: string }) | null)?.medicineName
+    ?? (item?.medicine as { name?: string } | undefined)?.name ?? '';
 
   const { register, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<FormValues>({
     mode: 'onTouched',
@@ -68,16 +69,20 @@ export function AdjustStockDialog({ item, open, onOpenChange }: Props) {
 
   const mutation = useMutation({
     mutationFn: async (data: FormValues) => {
+      // Map the physical-count variance to the backend's adjustmentType + quantity.
+      const adjustmentType = variance >= 0 ? 'addition' : 'deduction';
+      const notes = [data.reason, data.notes].filter(Boolean).join(' — ');
       const res = await apiFetch(`/api/inventory/${item!.id}/adjust`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adjustment: variance, physicalCount: data.physicalCount, reason: data.reason, notes: data.notes }),
+        body: JSON.stringify({ adjustmentType, quantity: Math.abs(variance), notes }),
       });
       const json = await res.json() as { success: boolean; message?: string };
-      if (!json.success) throw new Error(json.message ?? 'Adjustment failed');
+      if (!res.ok || !json.success) throw new Error(json.message ?? 'Adjustment failed');
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['inventory-stats'] });
       toast.success('Stock adjustment submitted', {
         description: largeVariance ? 'Pending approval — manager has been notified.' : 'Applied immediately.',
       });

@@ -60,3 +60,13 @@ apps/api/uploads
 # TypeScript build info
 *.tsbuildinfo
 apps/api/server-run.log
+
+# Playwright
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# stray dev server logs
+*-run.log
+dev-*.log

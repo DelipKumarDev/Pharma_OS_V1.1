@@ -1,0 +1,32 @@
+# Keep the build context small and free of secrets/build artifacts.
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+
+# Secrets & local env — never copy into image layers
+**/.env
+**/.env.*
+!**/.env.example
+
+# VCS / editor / CI
+.git
+.github
+.vscode
+.idea
+
+# Runtime data that must not be baked into images
+**/logs
+**/uploads
+**/backups
+**/*.log
+
+# Tests, docs, tooling not needed at runtime
+**/*.test.ts
+**/scripts/*.test.ts
+playwright.config.ts
+test-results
+qa
+postman
+tests
+**/*.md

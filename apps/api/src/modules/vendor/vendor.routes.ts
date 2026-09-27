@@ -14,5 +14,17 @@ router.patch('/:id', requirePermission('vendors', 'edit'), vendorController.upda
 router.delete('/:id', requirePermission('vendors', 'edit'), vendorController.deactivate);
 router.get('/:id/invoices', requirePermission('vendors', 'view'), vendorController.getInvoices);
 router.get('/:id/payments', requirePermission('vendors', 'view'), vendorController.getPayments);
+// Record a payment against a vendor. The vendor id comes from the URL; inject it
+// into the body so the service (which reads body.vendorId) receives it. This
+// route was missing, which is why "Record Payment" errored (Divya R65 / Vinay P8.2).
+router.post('/:id/payments', requirePermission('vendors', 'edit'), (req, _res, next) => {
+  (req.body as Record<string, unknown>)['vendorId'] = req.params['id'];
+  next();
+}, vendorController.createPayment);
+// Create a purchase invoice for a vendor (used by "Upload Invoice").
+router.post('/:id/invoices', requirePermission('vendors', 'edit'), (req, _res, next) => {
+  (req.body as Record<string, unknown>)['vendorId'] = req.params['id'];
+  next();
+}, vendorController.createInvoice);
 
 export default router;

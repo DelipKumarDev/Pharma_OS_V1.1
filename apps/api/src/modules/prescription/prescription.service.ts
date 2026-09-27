@@ -64,6 +64,14 @@ export async function createPrescription(tenantId: string, input: Record<string,
   if (!(input['customerName'] as string | undefined)?.trim()) throw new AppError('Customer name is required', 422);
   const medicines = (input['medicines'] as Array<Record<string, unknown>>) ?? [];
   if (medicines.length === 0) throw new AppError('At least one medicine is required', 422);
+  // Validate the required per-medicine fields up front → clean 422 instead of a
+  // leaked Prisma error if the client omits a column.
+  for (const m of medicines) {
+    if (!(m['medicineName'] as string | undefined)?.trim()) throw new AppError('Each prescribed medicine needs a name', 422);
+    if (!(m['dosage'] as string | undefined)?.trim()) throw new AppError(`Dosage is required for ${m['medicineName']}`, 422);
+    if (!(m['frequency'] as string | undefined)?.trim()) throw new AppError(`Frequency is required for ${m['medicineName']}`, 422);
+    if (!(m['duration'] as string | undefined)?.trim()) throw new AppError(`Duration is required for ${m['medicineName']}`, 422);
+  }
 
   const prescriptionNumber = await getNextRxNumber(tenantId);
 
@@ -81,6 +89,9 @@ export async function createPrescription(tenantId: string, input: Record<string,
       validUntil: input['validUntil'] ? new Date(input['validUntil'] as string) : new Date(Date.now() + 30 * 86400000),
       status: 'pending_review',
       notes: input['notes'] as string | undefined,
+      // Uploaded prescription scan (base64 data URL) + its kind ('image' | 'pdf').
+      imageUrl: (input['imageUrl'] as string | undefined) || undefined,
+      imageType: (input['imageType'] as string | undefined) || undefined,
       createdBy: userId,
       updatedBy: userId,
     },

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
@@ -8,7 +9,7 @@ import {
   FileText, Clock, CheckCircle, XCircle, AlertTriangle, Plus,
   MoreHorizontal, Eye, Check, X, Printer, Receipt, Upload,
   User, Stethoscope, Calendar, Pill, ChevronDown, ChevronUp,
-  Loader2,
+  Loader2, RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
@@ -81,14 +82,19 @@ function StatusBadge({ status }: { status: PrescriptionStatus }) {
 
 const addSchema = z.object({
   customerName: z.string().min(2, 'Required'),
-  customerPhone: z.string().optional(),
+  customerPhone: z.string().optional().refine((v) => !v || /^\d{10}$/.test(v), 'Phone must be exactly 10 digits'),
   doctorName: z.string().min(2, 'Required'),
   doctorRegNumber: z.string().optional(),
   hospitalName: z.string().optional(),
   prescriptionDate: z.string().min(1, 'Required'),
   validUntil: z.string().optional(),
   notes: z.string().optional(),
-});
+}).refine((d) => {
+  // Prescription validity cannot be a past date (Vinay P10.1).
+  if (!d.validUntil) return true;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return new Date(d.validUntil) >= today;
+}, { message: 'Validity date cannot be in the past', path: ['validUntil'] });
 type AddFormValues = z.infer<typeof addSchema>;
 
 // ─── Reject dialog ────────────────────────────────────────────────────────────
@@ -105,13 +111,18 @@ function RejectDialog({ rx, onClose }: { rx: Prescription; onClose: () => void }
       onClose();
     },
   });
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4">
+  // Portal to <body> with a z-index above the detail Sheet — otherwise the modal
+  // renders inside the Sheet's stacking/overflow context and its content is hidden
+  // (Divya R149 / Vinay P10.3: "pop-up appears but content is not visible").
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl mx-4" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold text-lg mb-1">Reject Prescription</h3>
         <p className="text-sm text-muted-foreground mb-4">{rx.prescriptionNumber} — {rx.customerName}</p>
         <Label className="text-xs mb-1.5 block">Reason for rejection <span className="text-destructive">*</span></Label>
         <textarea
+          autoFocus
           className="w-full rounded-lg border border-border bg-background p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary min-h-[80px]"
           placeholder="e.g. Prescription appears altered, doctor signature missing…"
           value={reason}
@@ -124,7 +135,8 @@ function RejectDialog({ rx, onClose }: { rx: Prescription; onClose: () => void }
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -156,6 +168,16 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
     },
   });
 
+  const revokeMut = useMutation({
+    mutationFn: async () => { await apiFetch(`/api/prescriptions/${rx.id}/revoke`, { method: 'PATCH' }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['prescriptions'] });
+      qc.invalidateQueries({ queryKey: ['prescription-stats'] });
+      toast.success('Dispensing revoked — back to Approved');
+      onClose();
+    },
+  });
+
   return (
     <>
       <Sheet open onOpenChange={onClose}>
@@ -165,9 +187,12 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
               <FileText className="h-4 w-4 text-primary" />
               {rx.prescriptionNumber}
             </SheetTitle>
-            <SheetDescription>
-              <StatusBadge status={rx.status} />
+            <SheetDescription className="sr-only">
+              Prescription {rx.prescriptionNumber} — status {rx.status}
             </SheetDescription>
+            <div>
+              <StatusBadge status={rx.status} />
+            </div>
           </SheetHeader>
 
           <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-2">
@@ -266,16 +291,38 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
               </div>
             )}
 
-            {/* Prescription image placeholder */}
-            <div className="rounded-lg border-2 border-dashed border-border p-6 text-center">
-              <FileText className="h-10 w-10 text-muted-foreground/30 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">
-                {rx.imageType === 'pdf' ? 'PDF prescription attached' : 'Prescription image attached'}
-              </p>
-              <Button variant="outline" size="sm" className="mt-2">
-                <Eye className="h-3.5 w-3.5" /> View {rx.imageType === 'pdf' ? 'PDF' : 'Image'}
-              </Button>
-            </div>
+            {/* Uploaded prescription scan */}
+            {rx.imageUrl ? (
+              rx.imageType === 'pdf' ? (
+                <div className="rounded-lg border border-border p-6 text-center">
+                  <FileText className="h-10 w-10 text-primary/60 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">PDF prescription attached</p>
+                  <a href={rx.imageUrl} target="_blank" rel="noreferrer">
+                    <Button variant="outline" size="sm" className="mt-2">
+                      <Eye className="h-3.5 w-3.5" /> Open PDF
+                    </Button>
+                  </a>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <a href={rx.imageUrl} target="_blank" rel="noreferrer" title="Open full size">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={rx.imageUrl} alt="Prescription scan" className="w-full max-h-96 object-contain bg-muted" />
+                  </a>
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/30">
+                    <span className="text-xs text-muted-foreground">Prescription scan</span>
+                    <a href={rx.imageUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+                      <Eye className="h-3.5 w-3.5" /> View full size
+                    </a>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="rounded-lg border-2 border-dashed border-border p-6 text-center">
+                <FileText className="h-10 w-10 text-muted-foreground/30 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No prescription image attached</p>
+              </div>
+            )}
           </div>
 
           <SheetFooter className="gap-2 px-6 pb-6 pt-2">
@@ -299,6 +346,11 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
                 </Button>
               </>
             )}
+            {rx.status === 'dispensed' && (
+              <Button variant="outline" className="flex-1" onClick={() => revokeMut.mutate()} disabled={revokeMut.isPending}>
+                {revokeMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><RotateCcw className="h-4 w-4" /> Revoke Dispensing</>}
+              </Button>
+            )}
             {(rx.status === 'dispensed' || rx.status === 'rejected') && (
               <Button variant="outline" className="flex-1" onClick={onClose}>Close</Button>
             )}
@@ -313,6 +365,39 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
 
 // ─── Add prescription sheet ───────────────────────────────────────────────────
 
+// Turn the picked file into a persistable base64 data URL. Images are downscaled
+// (max 1400px, JPEG q0.8) so the stored scan stays small; PDFs are embedded as-is.
+async function fileToStored(f: File): Promise<{ url: string; type: 'image' | 'pdf' }> {
+  const readDataUrl = (file: File) => new Promise<string>((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result as string);
+    fr.onerror = () => rej(new Error('read failed'));
+    fr.readAsDataURL(file);
+  });
+  const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+  if (isPdf) return { url: await readDataUrl(f), type: 'pdf' };
+
+  const raw = await readDataUrl(f);
+  try {
+    const img = new Image();
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('img')); img.src = raw; });
+    const maxDim = 1400;
+    let { width, height } = img;
+    if (width > maxDim || height > maxDim) {
+      const scale = maxDim / Math.max(width, height);
+      width = Math.round(width * scale); height = Math.round(height * scale);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return { url: raw, type: 'image' };
+    ctx.drawImage(img, 0, 0, width, height);
+    return { url: canvas.toDataURL('image/jpeg', 0.82), type: 'image' };
+  } catch {
+    return { url: raw, type: 'image' }; // fall back to the original if canvas fails
+  }
+}
+
 function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const { register, handleSubmit, reset, formState: { errors } } = useForm<AddFormValues>({
@@ -321,30 +406,54 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
     defaultValues: { prescriptionDate: new Date().toISOString().substring(0, 10) },
   });
   const [medicines, setMedicines] = useState([{ name: '', dosage: '', frequency: '', duration: '', qty: '' }]);
+  const [rxFile, setRxFile] = useState<File | null>(null);
+  const [rxPreview, setRxPreview] = useState<string | null>(null);
+  const [rxStored, setRxStored] = useState<{ url: string; type: 'image' | 'pdf' } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function pickFile(f: File | undefined) {
+    if (!f) return;
+    if (!/\.(png|jpe?g|webp|pdf)$/i.test(f.name)) { toast.error('Upload an image (PNG/JPG) or PDF'); return; }
+    if (f.size > 10 * 1024 * 1024) { toast.error('File too large (max 10 MB)'); return; }
+    setRxFile(f);
+    setRxPreview(/\.pdf$/i.test(f.name) ? null : URL.createObjectURL(f));
+    setRxStored(null);
+    // Convert to a persistable data URL so the scan is saved with the record.
+    fileToStored(f).then(setRxStored).catch(() => { toast.error('Could not process the file'); setRxStored(null); });
+    toast.success(`Attached: ${f.name}`);
+  }
 
   const mutation = useMutation({
     mutationFn: async (data: AddFormValues) => {
+      const meds = medicines.filter((m) => m.name.trim());
+      if (meds.length === 0) throw new Error('Add at least one medicine before registering');
       const payload = {
         ...data,
-        medicines: medicines.filter((m) => m.name.trim()).map((m, i) => ({
+        medicines: meds.map((m) => ({
           medicineName: m.name, dosage: m.dosage, frequency: m.frequency,
           duration: m.duration, quantity: m.qty ? Number(m.qty) : undefined,
         })),
+        imageUrl: rxStored?.url,
+        imageType: rxStored?.type,
       };
       const r = await apiFetch('/api/prescriptions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      return (await r.json()) as { data: Prescription };
+      const j = await r.json() as { success: boolean; message?: string; data: Prescription };
+      // TC_009: surface real failures instead of falsely reporting success.
+      if (!r.ok || !j.success) throw new Error(j.message ?? 'Failed to register prescription');
+      return j.data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['prescriptions'] });
       qc.invalidateQueries({ queryKey: ['prescription-stats'] });
       toast.success('Prescription registered for review');
       reset(); setMedicines([{ name: '', dosage: '', frequency: '', duration: '', qty: '' }]);
+      setRxFile(null); setRxPreview(null); setRxStored(null);
       onClose();
     },
-    onError: () => toast.error('Failed to register prescription'),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   function addMedRow() { setMedicines((p) => [...p, { name: '', dosage: '', frequency: '', duration: '', qty: '' }]); }
@@ -364,11 +473,31 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
         </SheetHeader>
 
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-2">
-          {/* Upload zone */}
-          <div className="rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 p-4 text-center cursor-pointer hover:bg-primary/10 transition-colors">
-            <Upload className="h-8 w-8 text-primary/50 mx-auto mb-1" />
-            <p className="text-sm font-medium text-primary">Upload prescription image or PDF</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Click to browse or drag and drop</p>
+          {/* Upload zone (TC_005) */}
+          <div
+            onClick={() => fileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); pickFile(e.dataTransfer.files?.[0]); }}
+            className="rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 p-4 text-center cursor-pointer hover:bg-primary/10 transition-colors"
+          >
+            {rxFile ? (
+              <div className="flex flex-col items-center gap-2">
+                {rxPreview
+                  ? <img src={rxPreview} alt="Prescription" className="max-h-32 rounded-lg border border-border" />
+                  : <FileText className="h-8 w-8 text-primary" />}
+                <p className="text-sm font-medium text-primary">{rxFile.name}</p>
+                <button type="button" onClick={(e) => { e.stopPropagation(); setRxFile(null); setRxPreview(null); setRxStored(null); }}
+                  className="text-xs text-muted-foreground hover:text-destructive">Remove</button>
+              </div>
+            ) : (
+              <>
+                <Upload className="h-8 w-8 text-primary/50 mx-auto mb-1" />
+                <p className="text-sm font-medium text-primary">Upload prescription image or PDF</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Click to browse or drag and drop</p>
+              </>
+            )}
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" className="hidden"
+              onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ''; }} />
           </div>
 
           <Separator />
@@ -384,7 +513,9 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               </div>
               <div>
                 <Label className="text-xs">Phone</Label>
-                <Input {...register('customerPhone')} className="mt-1 h-8 text-sm" placeholder="10-digit number" maxLength={10} />
+                <Input {...register('customerPhone')} inputMode="numeric" className="mt-1 h-8 text-sm" placeholder="10-digit number" maxLength={10}
+                  onInput={(e) => { const t = e.target as HTMLInputElement; t.value = t.value.replace(/\D/g, '').slice(0, 10); }} />
+                {errors.customerPhone && <p className="text-xs text-destructive mt-0.5">{errors.customerPhone.message}</p>}
               </div>
             </div>
           </div>
@@ -417,7 +548,8 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             </div>
             <div>
               <Label className="text-xs">Valid Until</Label>
-              <Input type="date" {...register('validUntil')} className="mt-1 h-8 text-sm" />
+              <Input type="date" min={new Date().toISOString().substring(0, 10)} {...register('validUntil')} className="mt-1 h-8 text-sm" />
+              {errors.validUntil && <p className="text-2xs text-destructive mt-1">{errors.validUntil.message}</p>}
             </div>
           </div>
 
@@ -593,30 +725,42 @@ export function PrescriptionsView() {
         </Button>
       </div>
 
-      {/* Stats */}
+      {/* Stats — each card is a filter for its tab; the ACTIVE tab's card is the
+          one highlighted (ring), so the header selection always matches the tab. */}
       {stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
-            { label: 'Total', value: stats.total, icon: FileText, color: 'text-primary', bg: 'bg-primary/10' },
-            { label: 'Pending Review', value: stats.pendingReview, icon: Clock, color: 'text-warning-600', bg: 'bg-warning/10', urgent: stats.pendingReview > 0 },
-            { label: 'Approved', value: stats.approved, icon: CheckCircle, color: 'text-success', bg: 'bg-success/10' },
-            { label: 'Dispensed Today', value: stats.dispensedToday, icon: Pill, color: 'text-blue-600', bg: 'bg-blue-500/10' },
-            { label: 'Rejected', value: stats.rejected, icon: XCircle, color: 'text-destructive', bg: 'bg-destructive/10' },
-            { label: 'Expiring Soon', value: stats.expiringSoon, icon: AlertTriangle, color: 'text-warning-600', bg: 'bg-warning/10' },
-          ].map(({ label, value, icon: Icon, color, bg, urgent }) => (
-            <div key={label} className={cn(
-              'flex items-center gap-3 rounded-xl border border-border bg-card p-4',
-              urgent && 'border-warning/50 bg-warning/5'
-            )}>
-              <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', bg)}>
-                <Icon className={cn('h-4 w-4', color)} />
-              </div>
-              <div>
-                <p className="text-lg font-bold leading-tight">{value}</p>
-                <p className="text-xs text-muted-foreground">{label}</p>
-              </div>
-            </div>
-          ))}
+            { label: 'Total', value: stats.total, icon: FileText, color: 'text-primary', bg: 'bg-primary/10', tabKey: 'all' as const },
+            { label: 'Pending Review', value: stats.pendingReview, icon: Clock, color: 'text-warning-600', bg: 'bg-warning/10', tabKey: 'pending_review' as const, urgent: stats.pendingReview > 0 },
+            { label: 'Approved', value: stats.approved, icon: CheckCircle, color: 'text-success', bg: 'bg-success/10', tabKey: 'approved' as const },
+            { label: 'Dispensed Today', value: stats.dispensedToday, icon: Pill, color: 'text-blue-600', bg: 'bg-blue-500/10', tabKey: 'dispensed' as const },
+            { label: 'Rejected', value: stats.rejected, icon: XCircle, color: 'text-destructive', bg: 'bg-destructive/10', tabKey: 'rejected' as const },
+            { label: 'Expiring Soon', value: stats.expiringSoon, icon: AlertTriangle, color: 'text-warning-600', bg: 'bg-warning/10', tabKey: null },
+          ].map(({ label, value, icon: Icon, color, bg, urgent, tabKey }) => {
+            const selected = tabKey !== null && activeTab === tabKey;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => tabKey && setActiveTab(tabKey)}
+                disabled={tabKey === null}
+                className={cn(
+                  'flex items-center gap-3 rounded-xl border bg-card p-4 text-left transition-all',
+                  selected ? 'border-primary ring-2 ring-primary/25' : 'border-border',
+                  !selected && urgent && 'border-warning/40',
+                  tabKey && !selected && 'hover:bg-muted/50 cursor-pointer',
+                )}
+              >
+                <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', bg)}>
+                  <Icon className={cn('h-4 w-4', color)} />
+                </div>
+                <div>
+                  <p className="text-lg font-bold leading-tight">{value}</p>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -665,7 +809,7 @@ export function PrescriptionsView() {
         columns={columns}
         data={prescriptions}
         loading={isLoading}
-        searchColumn="prescriptionNumber"
+        globalSearch
         searchPlaceholder="Search by Rx number, patient, or doctor…"
         emptyMessage="No prescriptions found"
         emptyDescription="Register a new prescription to get started."

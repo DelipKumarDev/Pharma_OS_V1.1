@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import { CalendarX2, AlertTriangle, CheckCircle, XCircle, Download, RotateCcw, Trash2, Tag, Package } from 'lucide-react';
@@ -14,33 +15,53 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { exportToExcel } from '@/lib/export';
+
+// The inventory API returns medicine fields flat (medicineName / dosageForm),
+// not a nested `medicine` object.
+type InvRow = InventoryItem & { medicineName?: string; supplierName?: string };
+const medName = (i: InventoryItem) => (i as InvRow).medicineName ?? '—';
 
 async function fetchInventory(): Promise<InventoryItem[]> {
-  const res = await apiFetch('/api/inventory?limit=100');
+  const res = await apiFetch('/api/inventory?limit=1000');
   const json = await res.json() as { success: boolean; data: { data: InventoryItem[] } };
   if (!res.ok) throw new Error('Request failed');
   return json.data?.data ?? ([] as InventoryItem[]);
 }
 
-function exportExpiryCSV(data: InventoryItem[], label: string) {
-  const headers = ['Medicine', 'Batch', 'Qty', 'MRP', 'Value at Risk', 'Expiry Date', 'Days Left', 'Rack', 'Supplier'];
-  const rows = data.map((i) => {
-    const med = i.medicine as { name: string } | undefined;
-    const days = daysUntilExpiry(i.expiryDate);
-    return [med?.name ?? '', i.batchNumber, i.availableQuantity, i.mrp, (i.availableQuantity * i.mrp).toFixed(2), formatDate(i.expiryDate), days, i.rackLocation ?? '', i.supplierName ?? ''].join(',');
-  });
-  const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `expiry-${label}-${new Date().toISOString().split('T')[0]}.csv` });
-  a.click();
+// Human-readable time-to-expiry with an explicit unit (TC_010).
+function expiryLabel(dateStr: string): string {
+  const d = daysUntilExpiry(dateStr);
+  if (d < 0) { const n = Math.abs(d); return `${n} day${n !== 1 ? 's' : ''} over`; }
+  if (d < 60) return `${d} day${d !== 1 ? 's' : ''}`;
+  const m = Math.round(d / 30);
+  return `${m} month${m !== 1 ? 's' : ''}`;
+}
+
+function exportExpiryExcel(data: InventoryItem[], label: string) {
+  const headers = ['Medicine', 'Batch', 'Qty', 'MRP', 'Value at Risk', 'Expiry Date', 'Time Left', 'Rack', 'Supplier'];
+  const rows = data.map((i) => [
+    medName(i), i.batchNumber, i.availableQuantity, i.mrp,
+    (i.availableQuantity * i.mrp).toFixed(2), formatDate(i.expiryDate),
+    expiryLabel(i.expiryDate), i.rackLocation ?? '', (i as InvRow).supplierName ?? '',
+  ]);
+  exportToExcel(`expiry-${label}-${new Date().toISOString().split('T')[0]}`, headers, rows);
   toast.success(`Exported ${data.length} items`);
 }
 
 export function ExpiryView() {
   const qc = useQueryClient();
+  const router = useRouter();
   const [disposeTarget, setDisposeTarget] = useState<InventoryItem | null>(null);
   const [returnTarget, setReturnTarget] = useState<InventoryItem | null>(null);
+  const [discountTarget, setDiscountTarget] = useState<InventoryItem | null>(null);
+  const [discountPct, setDiscountPct] = useState('25');
+  const [bulkDispose, setBulkDispose] = useState(false);
 
-  const { data = [], isLoading } = useQuery({ queryKey: ['inventory', 'all'], queryFn: fetchInventory });
+  const { data: rawData = [], isLoading } = useQuery({ queryKey: ['inventory', 'all'], queryFn: fetchInventory });
+  // Once a batch is fully disposed / exhausted (0 available), there is nothing
+  // left to return or dispose — drop it so "Mark Disposed" visibly clears it.
+  const data = rawData.filter((i) => (i.availableQuantity ?? 0) > 0);
 
   const now = Date.now();
   const expired = data.filter((i) => new Date(i.expiryDate).getTime() < now);
@@ -54,27 +75,102 @@ export function ExpiryView() {
   const valueAtRisk90 = expiring90.reduce((s, i) => s + i.availableQuantity * i.mrp, 0);
   const expiredValue = expired.reduce((s, i) => s + i.availableQuantity * i.mrp, 0);
 
+  // Dispose = deduct the full remaining quantity of a batch (correct backend
+  // payload: adjustmentType + quantity + notes) — TC_018.
+  async function disposeBatch(item: InventoryItem) {
+    const r = await apiFetch(`/api/inventory/${item.id}/adjust`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adjustmentType: 'damage', quantity: item.availableQuantity, notes: 'Expired units disposed' }),
+    });
+    const j = await r.json() as { success: boolean; message?: string };
+    if (!r.ok || !j.success) throw new Error(j.message ?? 'Dispose failed');
+  }
+
   const disposeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiFetch(`/api/inventory/${id}/adjust`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adjustment: -(disposeTarget?.availableQuantity ?? 0), reason: 'Expired units disposed' }) });
+    mutationFn: (item: InventoryItem) => disposeBatch(item),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success('Batch marked as disposed', { description: 'Stock deducted and audit log updated.' });
+      setDisposeTarget(null);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Batch marked as disposed', { description: 'Disposal certificate generated. Audit log updated.' }); setDisposeTarget(null); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Bulk dispose every expired batch (TC_011).
+  const bulkDisposeMutation = useMutation({
+    mutationFn: async () => {
+      let ok = 0;
+      for (const item of expired) { try { await disposeBatch(item); ok++; } catch { /* continue */ } }
+      return ok;
+    },
+    onSuccess: (ok) => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success(`Disposed ${ok} expired batch${ok !== 1 ? 'es' : ''}`, { description: 'Stock deducted; audit log updated.' });
+      setBulkDispose(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Initiate a supplier return for a near/expired batch — creates a real vendor
+  // return so the count/stock updates (TC_015).
+  const returnMutation = useMutation({
+    mutationFn: async (item: InventoryItem) => {
+      const r = await apiFetch('/api/returns', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'vendor_return', reason: 'near_expiry', refundMethod: 'credit_note',
+          vendorName: (item as InvRow).supplierName ?? undefined,
+          items: [{ medicineId: item.medicineId, medicineName: medName(item), batchNumber: item.batchNumber, expiryDate: item.expiryDate, returnQty: item.availableQuantity, unitPrice: item.mrp, totalAmount: item.availableQuantity * item.mrp, condition: 'expired' }],
+        }),
+      });
+      const j = await r.json() as { success: boolean; message?: string; data?: { returnNumber?: string } };
+      if (!r.ok || !j.success) throw new Error(j.message ?? 'Return failed');
+      return j.data?.returnNumber;
+    },
+    onSuccess: (num) => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['returns'] });
+      toast.success(`Return ${num ?? ''} initiated`, {
+        description: 'Track it under Procurement → Purchase Returns.',
+        action: { label: 'View in Returns', onClick: () => router.push('/purchase-returns') },
+      });
+      setReturnTarget(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Apply a clearance discount to a near-expiry batch's selling price (TC_017).
+  const discountMutation = useMutation({
+    mutationFn: async ({ item, pct }: { item: InventoryItem; pct: number }) => {
+      const newPrice = Number((item.mrp * (1 - pct / 100)).toFixed(2));
+      const r = await apiFetch(`/api/inventory/${item.id}/status`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'available', sellingPrice: newPrice }),
+      });
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!r.ok || !j.success) throw new Error(j.message ?? 'Discount failed');
+      return newPrice;
+    },
+    onSuccess: (newPrice, { item }) => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success(`Discount applied to ${medName(item)}`, { description: `Clearance price set to ${formatCurrency(newPrice)}` });
+      setDiscountTarget(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   function buildColumns(showDaysLeft = true): ColumnDef<InventoryItem>[] {
     return [
       {
-        accessorKey: 'medicine',
+        id: 'medicine',
+        accessorFn: (row) => medName(row),
         header: 'Medicine',
-        cell: ({ row }) => {
-          const med = row.original.medicine as { name: string } | undefined;
-          return (
-            <div>
-              <p className="font-medium text-sm">{med?.name ?? '—'}</p>
-              <p className="text-xs text-muted-foreground">{row.original.manufacturer ?? ''}</p>
-            </div>
-          );
-        },
+        cell: ({ row }) => (
+          <div>
+            <p className="font-medium text-sm">{medName(row.original)}</p>
+            <p className="text-xs text-muted-foreground">{row.original.manufacturer ?? ''}</p>
+          </div>
+        ),
       },
       {
         accessorKey: 'batchNumber',
@@ -102,12 +198,12 @@ export function ExpiryView() {
       },
       ...(showDaysLeft ? [{
         id: 'daysLeft',
-        header: ({ column }: { column: Parameters<typeof SortableHeader>[0]['column'] }) => <SortableHeader column={column}>Days Left</SortableHeader>,
+        header: ({ column }: { column: Parameters<typeof SortableHeader>[0]['column'] }) => <SortableHeader column={column}>Time Left</SortableHeader>,
         cell: ({ row }: { row: { original: InventoryItem } }) => {
           const days = daysUntilExpiry(row.original.expiryDate);
           return (
             <Badge variant={days < 0 ? 'error' : days <= 30 ? 'error' : days <= 60 ? 'warning' : 'muted'} className="text-xs tabular-nums">
-              {days < 0 ? `${Math.abs(days)}d over` : `${days}d`}
+              {expiryLabel(row.original.expiryDate)}
             </Badge>
           );
         },
@@ -120,19 +216,26 @@ export function ExpiryView() {
       {
         id: 'actions',
         header: '',
-        cell: ({ row }) => (
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setReturnTarget(row.original)}>
-              <RotateCcw className="h-3 w-3" /> Return
-            </Button>
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => toast.info(`Applying discount to ${(row.original.medicine as { name: string } | undefined)?.name}…`)}>
-              <Tag className="h-3 w-3" /> Discount
-            </Button>
-            <Button variant="destructive" size="sm" className="h-7 text-xs gap-1" onClick={() => setDisposeTarget(row.original)}>
-              <Trash2 className="h-3 w-3" /> Dispose
-            </Button>
-          </div>
-        ),
+        cell: ({ row }) => {
+          // Already-expired stock cannot be sold, so a clearance Discount makes no
+          // sense — only Return / Dispose apply. Discount is for near-expiry only.
+          const isExpired = daysUntilExpiry(row.original.expiryDate) < 0;
+          return (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setReturnTarget(row.original)}>
+                <RotateCcw className="h-3 w-3" /> Return
+              </Button>
+              {!isExpired && (
+                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => { setDiscountPct('25'); setDiscountTarget(row.original); }}>
+                  <Tag className="h-3 w-3" /> Discount
+                </Button>
+              )}
+              <Button variant="destructive" size="sm" className="h-7 text-xs gap-1" onClick={() => setDisposeTarget(row.original)}>
+                <Trash2 className="h-3 w-3" /> Dispose
+              </Button>
+            </div>
+          );
+        },
       },
     ] as ColumnDef<InventoryItem>[];
   }
@@ -152,11 +255,11 @@ export function ExpiryView() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Expiry Alert Dashboard</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Expiry Monitor</h1>
           <p className="text-sm text-muted-foreground">Monitor, act on, and prevent expiry losses — Return · Discount · Dispose</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => exportExpiryCSV([...expired, ...expiring30, ...expiring60, ...expiring90], 'full-report')}>
+          <Button variant="outline" size="sm" onClick={() => exportExpiryExcel([...expired, ...expiring30, ...expiring60, ...expiring90], 'full-report')}>
             <Download className="h-4 w-4" /> Export Report
           </Button>
         </div>
@@ -220,10 +323,10 @@ export function ExpiryView() {
                 <XCircle className="h-4 w-4 text-destructive" />
                 <p className="text-sm font-medium text-destructive">{expired.length} batches expired — Value at risk: {formatCurrency(expiredValue)}</p>
               </div>
-              <Button variant="destructive" size="sm" onClick={() => toast.info('Bulk dispose: select batches to process')}>Bulk Dispose</Button>
+              <Button variant="destructive" size="sm" onClick={() => setBulkDispose(true)}>Bulk Dispose</Button>
             </div>
           )}
-          <DataTable columns={buildColumns(false)} data={expired} loading={isLoading} searchColumn="batchNumber" searchPlaceholder="Search expired items…" emptyMessage="No expired items" emptyDescription="Great! No batches have expired." />
+          <DataTable columns={buildColumns(false)} data={expired} loading={isLoading} globalSearch searchPlaceholder="Search expired items…" emptyMessage="No expired items" emptyDescription="Great! No batches have expired." />
         </TabsContent>
 
         <TabsContent value="expiring30">
@@ -233,12 +336,12 @@ export function ExpiryView() {
                 <AlertTriangle className="h-4 w-4 text-warning-600" />
                 <p className="text-sm font-medium text-warning-600">{expiring30.length} batches expire in 30 days — Value at risk: {formatCurrency(valueAtRisk30)}</p>
               </div>
-              <Button variant="outline" size="sm" onClick={() => exportExpiryCSV(expiring30, '30d')}>
+              <Button variant="outline" size="sm" onClick={() => exportExpiryExcel(expiring30, '30d')}>
                 <Download className="h-3.5 w-3.5" /> Export
               </Button>
             </div>
           )}
-          <DataTable columns={buildColumns()} data={expiring30} loading={isLoading} searchColumn="batchNumber" searchPlaceholder="Search near-expiry items…" emptyMessage="No items expiring in 30 days" emptyDescription="No urgent expiry alerts." />
+          <DataTable columns={buildColumns()} data={expiring30} loading={isLoading} globalSearch searchPlaceholder="Search near-expiry items…" emptyMessage="No items expiring in 30 days" emptyDescription="No urgent expiry alerts." />
         </TabsContent>
 
         <TabsContent value="expiring60">
@@ -248,11 +351,11 @@ export function ExpiryView() {
               <p className="text-sm font-medium text-orange-700">{expiring60.length} batches expire in 31–60 days — Value: {formatCurrency(valueAtRisk60)}</p>
             </div>
           )}
-          <DataTable columns={buildColumns()} data={expiring60} loading={isLoading} searchColumn="batchNumber" searchPlaceholder="Search 31–60 day expiry…" emptyMessage="No items expiring in 31–60 days" emptyDescription="No alerts for this window." />
+          <DataTable columns={buildColumns()} data={expiring60} loading={isLoading} globalSearch searchPlaceholder="Search 31–60 day expiry…" emptyMessage="No items expiring in 31–60 days" emptyDescription="No alerts for this window." />
         </TabsContent>
 
         <TabsContent value="expiring90">
-          <DataTable columns={buildColumns()} data={expiring90} loading={isLoading} searchColumn="batchNumber" searchPlaceholder="Search 61–90 day expiry…" emptyMessage="No items expiring in 61–90 days" emptyDescription="No alerts for this window." />
+          <DataTable columns={buildColumns()} data={expiring90} loading={isLoading} globalSearch searchPlaceholder="Search 61–90 day expiry…" emptyMessage="No items expiring in 61–90 days" emptyDescription="No alerts for this window." />
         </TabsContent>
 
         <TabsContent value="good">
@@ -271,7 +374,7 @@ export function ExpiryView() {
             ] as ColumnDef<InventoryItem>[]}
             data={goodStock}
             loading={isLoading}
-            searchColumn="batchNumber"
+            globalSearch
             searchPlaceholder="Search good stock…"
             emptyMessage="No good-stock items"
             emptyDescription="All items have expiry concerns."
@@ -288,13 +391,13 @@ export function ExpiryView() {
               Dispose Expired Batch
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will mark <strong>{(disposeTarget?.medicine as { name: string } | undefined)?.name}</strong> batch <strong>{disposeTarget?.batchNumber}</strong> ({disposeTarget?.availableQuantity} units, value {formatCurrency((disposeTarget?.availableQuantity ?? 0) * (disposeTarget?.mrp ?? 0))}) as disposed.
+              This will mark <strong>{disposeTarget ? medName(disposeTarget) : ''}</strong> batch <strong>{disposeTarget?.batchNumber}</strong> ({disposeTarget?.availableQuantity} units, value {formatCurrency((disposeTarget?.availableQuantity ?? 0) * (disposeTarget?.mrp ?? 0))}) as disposed.
               A disposal record and audit log entry will be created. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => disposeTarget && disposeMutation.mutate(disposeTarget.id)}>
+            <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => disposeTarget && disposeMutation.mutate(disposeTarget)}>
               Confirm Disposal
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -310,14 +413,58 @@ export function ExpiryView() {
               Return to Supplier
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Initiate a supplier return for <strong>{(returnTarget?.medicine as { name: string } | undefined)?.name}</strong> batch <strong>{returnTarget?.batchNumber}</strong> ({returnTarget?.availableQuantity} units).
+              Initiate a supplier return for <strong>{returnTarget ? medName(returnTarget) : ''}</strong> batch <strong>{returnTarget?.batchNumber}</strong> ({returnTarget?.availableQuantity} units).
               A return request will be created and sent to <strong>{returnTarget?.supplierName ?? 'the supplier'}</strong>. Stock will be updated once confirmed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { toast.success(`Return request sent to ${returnTarget?.supplierName ?? 'supplier'}`); setReturnTarget(null); }}>
+            <AlertDialogAction onClick={() => returnTarget && returnMutation.mutate(returnTarget)} disabled={returnMutation.isPending}>
               Initiate Return
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk dispose confirmation (TC_011) */}
+      <AlertDialog open={bulkDispose} onOpenChange={setBulkDispose}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-destructive" /> Dispose All Expired Batches</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will dispose <strong>{expired.length}</strong> expired batch{expired.length !== 1 ? 'es' : ''} (value {formatCurrency(expiredValue)}). Stock will be deducted and an audit record created for each. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => bulkDisposeMutation.mutate()} disabled={bulkDisposeMutation.isPending}>
+              {bulkDisposeMutation.isPending ? 'Disposing…' : `Dispose ${expired.length} batches`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clearance discount (TC_017) */}
+      <AlertDialog open={!!discountTarget} onOpenChange={(o) => !o && setDiscountTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2"><Tag className="h-5 w-5 text-primary" /> Apply Clearance Discount</AlertDialogTitle>
+            <AlertDialogDescription>
+              Set a near-expiry clearance discount for <strong>{discountTarget ? medName(discountTarget) : ''}</strong> (batch {discountTarget?.batchNumber}). Current MRP {formatCurrency(discountTarget?.mrp ?? 0)}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex items-center gap-3 py-1">
+            <label className="text-sm">Discount %</label>
+            <input type="number" min={0} max={90} value={discountPct} onChange={(e) => setDiscountPct(e.target.value)}
+              className="h-9 w-24 rounded-md border border-input bg-background px-3 text-sm" />
+            <span className="text-sm text-muted-foreground">→ New price{' '}
+              <strong className="text-foreground">{formatCurrency((discountTarget?.mrp ?? 0) * (1 - (Number(discountPct) || 0) / 100))}</strong>
+            </span>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => discountTarget && discountMutation.mutate({ item: discountTarget, pct: Number(discountPct) || 0 })} disabled={discountMutation.isPending}>
+              Apply Discount
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

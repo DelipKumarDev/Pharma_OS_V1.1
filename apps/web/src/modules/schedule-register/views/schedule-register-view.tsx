@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiFetch } from '@/lib/api';
+import { exportToExcel } from '@/lib/export';
 
 interface RegisterEntry {
   id: string;
@@ -54,17 +55,14 @@ async function fetchStats(): Promise<RegisterStats> {
   return j.data;
 }
 
-async function downloadRegister(schedule: string) {
-  const params = new URLSearchParams();
-  if (schedule !== 'all') params.set('schedule', schedule);
-  const r = await apiFetch(`/api/schedule-register/export?${params}`);
-  if (!r.ok) { toast.error('Export failed'); return; }
-  const blob = await r.blob();
-  const a = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(blob),
-    download: `schedule-register-${new Date().toISOString().slice(0, 10)}.csv`,
-  });
-  a.click();
+function exportRegister(entries: RegisterEntry[]) {
+  if (entries.length === 0) { toast.warning('No entries to export'); return; }
+  const headers = ['Date', 'Medicine', 'Batch', 'Qty', 'Schedule', 'Patient', 'Patient Phone', 'Prescriber', 'Bill No', 'Dispensed By'];
+  const rows = entries.map((e) => [
+    formatDateTime(e.dispensedAt), e.medicineName, e.batchNumber, e.quantity, e.schedule,
+    e.patientName ?? '', e.patientPhone ?? '', e.doctorName ?? '', e.billNumber ?? '', e.dispensedByName ?? '',
+  ]);
+  exportToExcel(`schedule-register-${new Date().toISOString().slice(0, 10)}`, headers, rows);
   toast.success('Register exported');
 }
 
@@ -148,7 +146,7 @@ export function ScheduleRegisterView() {
             Statutory dispensing record for Schedule H, H1 &amp; X drugs — Drugs &amp; Cosmetics Act, 1940
           </p>
         </div>
-        <Button onClick={() => downloadRegister(tab)} variant="outline" size="sm" className="gap-1.5">
+        <Button onClick={() => exportRegister(entries)} variant="outline" size="sm" className="gap-1.5">
           <Download className="h-4 w-4" /> Export Register (CSV)
         </Button>
       </div>

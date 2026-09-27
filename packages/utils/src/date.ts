@@ -10,9 +10,18 @@ export function formatDateTime(date: string | Date): string {
   return format(d, 'dd MMM yyyy, hh:mm a');
 }
 
+// Numeric date pattern, set from the tenant's System Preferences date-format
+// setting (DD/MM/YYYY | MM/DD/YYYY | YYYY-MM-DD). Readable dates (formatDate /
+// formatDateTime) stay in the unambiguous "dd MMM yyyy" style.
+let activeShortPattern = 'dd/MM/yyyy';
+export function setActiveDateFormat(fmt?: string | null): void {
+  if (!fmt) return;
+  activeShortPattern = fmt === 'MM/DD/YYYY' ? 'MM/dd/yyyy' : fmt === 'YYYY-MM-DD' ? 'yyyy-MM-dd' : 'dd/MM/yyyy';
+}
+
 export function formatDateShort(date: string | Date): string {
   const d = typeof date === 'string' ? parseISO(date) : date;
-  return format(d, 'dd/MM/yyyy');
+  return format(d, activeShortPattern);
 }
 
 export function daysUntilExpiry(expiryDate: string): number {

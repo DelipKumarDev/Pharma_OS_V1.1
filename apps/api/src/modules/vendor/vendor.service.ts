@@ -56,7 +56,7 @@ export async function listVendors(tenantId: string, query: Record<string, string
         }
       : {}),
   };
-  const vendors = await prisma.vendor.findMany({ where, orderBy: { name: 'asc' } });
+  const vendors = await prisma.vendor.findMany({ where, orderBy: { createdAt: 'desc' } });
   return paginate(vendors, vendors.length, 1, 100);
 }
 
@@ -67,6 +67,14 @@ export async function getVendorById(tenantId: string, id: string) {
 }
 
 export async function createVendor(tenantId: string, input: Record<string, unknown>, userId: string) {
+  // Reject duplicate vendors (same name, case-insensitive) within the tenant.
+  const name = String(input['name'] ?? '').trim();
+  if (name) {
+    const existing = await prisma.vendor.findFirst({
+      where: { tenantId, deletedAt: null, name: { equals: name, mode: 'insensitive' } },
+    });
+    if (existing) throw new AppError(`A vendor named "${name}" already exists`, 409);
+  }
   return prisma.vendor.create({
     data: { tenantId, ...input, createdBy: userId, updatedBy: userId } as Prisma.VendorUncheckedCreateInput,
   });
@@ -183,11 +191,25 @@ export async function confirmPurchaseInvoice(tenantId: string, id: string, userI
 }
 
 export async function createVendorPayment(tenantId: string, input: Record<string, unknown>, userId: string) {
+  // Ownership guards — the vendor and (optional) invoice referenced in the body
+  // MUST belong to the caller's tenant, or this becomes a cross-tenant write that
+  // corrupts another pharmacy's vendor balance / invoice status.
+  const vendorId = input['vendorId'] as string | undefined;
+  if (!vendorId) throw new AppError('Vendor is required', 422);
+  const vendor = await prisma.vendor.findFirst({ where: { id: vendorId, tenantId, deletedAt: null } });
+  if (!vendor) throw new AppError('Vendor not found', 404);
+
+  const linkedInvoiceId = input['invoiceId'] as string | undefined;
+  if (linkedInvoiceId) {
+    const owned = await prisma.purchaseInvoice.findFirst({ where: { id: linkedInvoiceId, tenantId } });
+    if (!owned) throw new AppError('Invoice not found', 404);
+  }
+
   const payment = await prisma.vendorPayment.create({
     data: {
       tenantId,
-      vendorId: input['vendorId'] as string,
-      invoiceId: input['invoiceId'] as string | undefined,
+      vendorId,
+      invoiceId: linkedInvoiceId,
       amount: input['amount'] as number,
       paymentDate: input['paymentDate'] ? new Date(input['paymentDate'] as string) : new Date(),
       paymentMode: (input['paymentMode'] as VendorPaymentMode) ?? 'neft',
@@ -201,8 +223,8 @@ export async function createVendorPayment(tenantId: string, input: Record<string
   if (input['invoiceId']) {
     const inv = await prisma.purchaseInvoice.findUnique({ where: { id: input['invoiceId'] as string } });
     if (inv) {
-      const newPaid = inv.paidAmount + payment.amount;
-      const newPending = Math.max(0, inv.totalAmount - newPaid);
+      const newPaid = Number(inv.paidAmount) + Number(payment.amount);
+      const newPending = Math.max(0, Number(inv.totalAmount) - newPaid);
       await prisma.purchaseInvoice.update({
         where: { id: inv.id },
         data: {

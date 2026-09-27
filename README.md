@@ -1,99 +1,73 @@
-# PharmaOS — Enterprise Pharmacy Management Platform
+# PharmaOS — Pharmacy Management SaaS
 
-A production-grade, frontend-first pharmacy management SaaS built with Next.js 15, TurboRepo, and MSW.
+A multi-tenant pharmacy management platform: **Next.js 15** web app + **Express/Prisma/PostgreSQL** API, JWT auth with RBAC, deployed via **Docker + Nginx (HTTPS)**. Covers medicine master, inventory & batches, POS billing (GST), prescriptions, returns, vendors/purchases, customers & credit, reports, audit, and platform-operated tenant onboarding.
 
 ## Architecture
 
 ```
-pharmaos/
+pharmaos/  (pnpm workspaces + TurboRepo)
 ├── apps/
-│   └── web/              # Next.js 15 App Router frontend
+│   ├── web/     # Next.js 15 App Router frontend (TS, Tailwind, shadcn/ui, TanStack Query)
+│   └── api/     # Express + Prisma REST API (JWT, RBAC, multi-tenant)
 ├── packages/
-│   ├── types/            # Shared TypeScript type definitions
-│   ├── utils/            # Shared utilities (currency, date, string)
-│   ├── ui/               # Shared design system (TBD Phase 1 extension)
-│   └── mock/             # MSW handlers (currently in apps/web)
+│   ├── types/   # shared TypeScript types
+│   └── utils/   # shared utilities (currency, date, …)
+├── nginx/       # reverse proxy: TLS termination, HTTP→HTTPS, security headers
+└── docker-compose.yml  # db (Postgres 15) + api + web + nginx
 ```
 
-## Tech Stack
+The API is the source of truth; the web app calls it via `NEXT_PUBLIC_USE_REAL_API=true`. (An MSW mock layer exists under `apps/web/src/mock` for isolated frontend development only; it is disabled in production builds.)
+
+## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 15 (App Router) |
-| Language | TypeScript 5.7 (strict) |
-| Styling | TailwindCSS 3 + CSS Variables |
-| Components | shadcn/ui (Radix UI primitives) |
-| Forms | React Hook Form + Zod |
-| State | Zustand (client) |
-| Server State | TanStack Query v5 |
-| Tables | TanStack Table v8 |
-| Charts | Recharts |
-| Mock API | MSW v2 |
-| Monorepo | TurboRepo + pnpm workspaces |
-| Notifications | Sonner |
-| Icons | Lucide React |
+| Frontend | Next.js 15 (App Router), TypeScript, TailwindCSS, shadcn/ui, TanStack Query/Table, Zustand, React Hook Form + Zod |
+| API | Express 4, Prisma ORM, Zod, JWT (access/refresh), bcrypt, helmet, express-rate-limit |
+| Database | PostgreSQL 15 (money as `Decimal(12,2)`) |
+| Infra | Docker (multi-stage, non-root), Nginx (TLS, HSTS), pnpm + TurboRepo |
+| CI/CD | GitHub Actions (type-check, build, integration tests on Postgres) |
 
-## Quick Start
+## Local development
 
 ```bash
-# Install dependencies
 pnpm install
 
-# Start development server
-pnpm dev
+# API (apps/api): create .env from apps/api/.env.example, then:
+pnpm --filter @pharmaos/api exec prisma migrate deploy
+pnpm --filter @pharmaos/api exec prisma generate
+pnpm --filter @pharmaos/api run db:seed        # demo data (dev only; refused in production)
 
-# Build for production
-pnpm build
-
-# Type check
-pnpm type-check
+pnpm dev                                        # web :3000 + api :4000
+pnpm type-check                                 # strict tsc (the quality gate)
 ```
 
-## Development
+Demo credentials (seeded, **development only**): `admin@divyapharmacy.com` / `Admin@123`.
 
-```
-URL: http://localhost:3000
+## Production deployment
 
-Demo credentials:
-Email: admin@divyapharmacy.com
-Password: Admin@123
-```
+See **`PRODUCTION_DEPLOYMENT_RUNBOOK.md`**. In short: fill `.env` (strong secrets, `APP_ORIGIN`, TLS certs in `nginx/certs`), then `docker compose build && docker compose up -d`. The API fails fast on unsafe production config, runs migrations on start, and exposes `/health` (liveness) + `/health/ready` (DB readiness). Only Nginx (80/443) is exposed.
 
-## Build Phases
+## Tenant onboarding
 
-| Phase | Status | Description |
-|---|---|---|
-| 1 — Repository + Design System | ✅ Complete | Monorepo, types, utils, shell, login, dashboard |
-| 2 — Authentication + Shell | 🔜 Next | Full auth flows, MFA, forgot password |
-| 3 — Medicine + Inventory | 🔜 | Medicine master CRUD, inventory management |
-| 4 — Billing + Reports | 🔜 | POS billing, reports, exports |
-| 5 — Offline + Polish | 🔜 | IndexedDB, PWA, sync queue |
+Pharmacies are provisioned by a **platform operator** (`scripts/create-platform-admin.ts`) via `POST /api/tenants` — creating the tenant, default roles, and an owner with a forced first-login password change. See **`CUSTOMER_ONBOARDING_RUNBOOK.md`**.
 
-## Design System
+## Testing
 
-PharmaOS uses a teal-based design language:
+Integration suites (run against a live API + Postgres) live in `apps/api/scripts/*.test.ts`:
 
-- **Primary**: Teal (`#0d9488`) — pharmaceutical trust
-- **Surface**: `#F8FAFC` — clean clinical white
-- **Dark sidebar**: `hsl(222 47% 11%)` — professional contrast
-- **Semantic**: Success green / Warning amber / Error red
-
-All design tokens are CSS custom properties in `globals.css`.
-
-## Mock API
-
-All API calls are intercepted by MSW in development. Mock data lives in:
-
-```
-src/mock/
-├── browser.ts          # MSW worker setup
-└── handlers/
-    ├── auth.ts
-    ├── dashboard.ts
-    ├── medicine.ts
-    ├── inventory.ts
-    ├── billing.ts
-    └── user.ts
+```bash
+pnpm --filter @pharmaos/api run test:security      # cross-tenant isolation / IDOR
+pnpm --filter @pharmaos/api run test:auth          # auth lifecycle
+pnpm --filter @pharmaos/api run test:integrity     # transactions / concurrency / money
+pnpm --filter @pharmaos/api run test:onboarding    # tenant provisioning + lifecycle
+pnpm --filter @pharmaos/api run test:pilot         # end-to-end pharmacy workflow
+pnpm --filter @pharmaos/api run test:security-scan # SQLi / mass-assign / headers / CORS
+pnpm --filter @pharmaos/api run test:config        # production config + seed guard
 ```
 
-To replace mocks with a real backend: remove the MSW setup in `providers.tsx` and point `fetch` calls at your API URL.
+CI runs all of these on PRs (`.github/workflows/ci.yml`).
+
+## Production hardening reports
+
+Security, database, backup/DR, deployment, monitoring, onboarding, performance, CI/CD, and the go-live readiness review are documented in the `*_REPORT.md` / `*_RUNBOOK.md` files at the repo root (see `PHARMAOS_GO_LIVE_READINESS_REPORT.md`).

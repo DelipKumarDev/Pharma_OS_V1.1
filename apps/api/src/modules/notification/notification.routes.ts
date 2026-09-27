@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate';
 import { prisma } from '../../config/database';
-import { sendSuccess } from '../../utils/response';
+import { sendSuccess, sendError } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
 import { NextFunction, Response } from 'express';
 import { Prisma, NotificationCategory } from '@prisma/client';
@@ -49,7 +49,14 @@ router.patch('/mark-all-read', async (req: AuthRequest, res: Response, next: Nex
 
 router.patch('/:id/read', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await prisma.notification.update({ where: { id: req.params['id'] }, data: { isRead: true, readAt: new Date() } });
+    // Tenant-scoped: only a notification owned by the caller's tenant can be
+    // updated. updateMany with a tenantId filter makes cross-tenant writes a
+    // no-op (count 0 → 404) rather than an IDOR.
+    const result = await prisma.notification.updateMany({
+      where: { id: req.params['id'], tenantId: t(req) },
+      data: { isRead: true, readAt: new Date() },
+    });
+    if (result.count === 0) { sendError(res, 'Notification not found', 404); return; }
     sendSuccess(res, null, 'Notification marked as read');
   } catch (err) { next(err); }
 });

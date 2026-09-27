@@ -13,7 +13,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { useDropdown } from '@/lib/dropdowns';
+import { useFormFieldConfig } from '@/lib/form-fields';
 import type { Medicine, MedicineCategory, MedicineForm, MedicineUnit, DrugSchedule } from '@pharmaos/types';
+
+// Prescription-mandatory drug schedules: dispensing requires a valid Rx.
+const RX_SCHEDULES = ['H', 'H1', 'X'];
+
+// Default GST slab suggested per drug schedule (user can still override).
+// Mapping follows common Indian pharmacy practice; GST is ultimately HSN-driven.
+const SCHEDULE_GST: Record<string, number> = { none: 5, H: 5, H1: 12, X: 12, G: 12 };
 
 const schema = z.object({
   name: z.string().min(2, 'Name is required'),
@@ -25,8 +35,8 @@ const schema = z.object({
   strength: z.string().min(1, 'Strength is required'),
   unit: z.string().min(1, 'Unit is required'),
   composition: z.string().optional(),
-  hsn: z.string().optional(),
-  schedule: z.string().optional(),
+  hsn: z.string().min(1, 'HSN code is required'),
+  schedule: z.string().min(1, 'Drug schedule is required'),
   requiresPrescription: z.boolean().default(false),
   gstRate: z.coerce.number().min(0).max(28),
   mrp: z.coerce.number().min(0.01, 'MRP is required'),
@@ -43,11 +53,8 @@ interface Props {
   medicine?: Medicine;
 }
 
-const CATEGORIES: MedicineCategory[] = ['analgesic', 'antibiotic', 'antacid', 'antihistamine', 'antifungal', 'antiviral', 'cardiovascular', 'diabetes', 'dermatology', 'gastroenterology', 'gynecology', 'neurology', 'oncology', 'ophthalmology', 'orthopedic', 'pediatric', 'psychiatry', 'respiratory', 'urology', 'vitamins', 'surgical', 'other'];
-const FORMS: MedicineForm[] = ['tablet', 'capsule', 'syrup', 'injection', 'cream', 'ointment', 'drops', 'inhaler', 'powder', 'gel', 'patch', 'spray', 'lotion', 'suspension', 'suppository'];
-const UNITS: MedicineUnit[] = ['strip', 'bottle', 'vial', 'tube', 'sachet', 'box', 'piece'];
+// Drug schedules are statutory (fixed) — not tenant-configurable.
 const SCHEDULES: { value: string; label: string }[] = [{ value: 'none', label: 'None (OTC)' }, { value: 'H', label: 'Schedule H' }, { value: 'H1', label: 'Schedule H1' }, { value: 'X', label: 'Schedule X' }, { value: 'G', label: 'Schedule G' }];
-const GST_RATES = [0, 5, 12, 18];
 
 async function saveMedicine(data: FormValues, id?: string): Promise<Medicine> {
   const payload = { ...data, schedule: (data.schedule === 'none' ? null : data.schedule) as DrugSchedule };
@@ -65,7 +72,20 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
   const isEdit = !!medicine;
   const qc = useQueryClient();
 
-  const { register, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<FormValues>({
+  const [confirmCancel, setConfirmCancel] = React.useState(false);
+
+  // TC_028: option lists come from tenant config (Settings → Dropdown Options),
+  // falling back to built-in defaults.
+  const CATEGORIES = useDropdown('medicineCategory');
+  const FORMS = useDropdown('medicineForm');
+  const UNITS = useDropdown('medicineUnit');
+  const GST_RATES = useDropdown('gstRate');
+
+  // Admin-configurable field labels/visibility (Settings → Form Fields → Medicine
+  // Master). Statutory/required fields stay put; only safe overrides are honoured.
+  const ff = useFormFieldConfig('medicine');
+
+  const { register, handleSubmit, setValue, watch, reset, formState: { errors, isDirty } } = useForm<FormValues>({
     mode: 'onTouched',
     resolver: zodResolver(schema),
     defaultValues: medicine
@@ -98,6 +118,29 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
   const schedule = watch('schedule');
   const gstRate = watch('gstRate');
   const requiresPrescription = watch('requiresPrescription');
+
+  // Selecting a drug schedule auto-populates Requires-Prescription (6th scenario)
+  // and a sensible default GST slab (5th scenario). Both remain user-overridable.
+  const handleScheduleChange = (v: string) => {
+    setValue('schedule', v, { shouldDirty: true });
+    // Rx: on for H/H1/X, off for OTC/none (and other non-Rx schedules).
+    setValue('requiresPrescription', RX_SCHEDULES.includes(v), { shouldDirty: true });
+    // GST: apply the schedule's default slab.
+    if (SCHEDULE_GST[v] !== undefined) setValue('gstRate', SCHEDULE_GST[v], { shouldDirty: true });
+  };
+
+  // TC_011: guard against losing unsaved edits. If the form is dirty, ask first;
+  // otherwise close immediately.
+  const attemptClose = () => {
+    if (isDirty) setConfirmCancel(true);
+    else onOpenChange(false);
+  };
+
+  const discardAndClose = () => {
+    setConfirmCancel(false);
+    reset();
+    onOpenChange(false);
+  };
 
   // ── Scan a medicine strip/box photo → best-effort auto-fill (user reviews) ──
   const [scanning, setScanning] = React.useState(false);
@@ -144,7 +187,8 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) attemptClose(); else onOpenChange(true); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Medicine' : 'Add New Medicine'}</DialogTitle>
@@ -191,7 +235,7 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
               {errors.manufacturer && <p className="text-xs text-destructive">{errors.manufacturer.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Strength <span className="text-destructive">*</span></Label>
+              <Label>{ff.label('strength', 'Strength')} <span className="text-destructive">*</span></Label>
               <Input {...register('strength')} placeholder="e.g. 500mg" />
               {errors.strength && <p className="text-xs text-destructive">{errors.strength.message}</p>}
             </div>
@@ -234,13 +278,14 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
           {/* Schedule, Rx, GST */}
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
-              <Label>Drug Schedule</Label>
-              <Select value={schedule ?? 'none'} onValueChange={(v) => setValue('schedule', v)}>
+              <Label>Drug Schedule <span className="text-destructive">*</span></Label>
+              <Select value={schedule ?? 'none'} onValueChange={handleScheduleChange}>
                 <SelectTrigger><SelectValue placeholder="Schedule" /></SelectTrigger>
                 <SelectContent>
                   {SCHEDULES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {errors.schedule && <p className="text-xs text-destructive">{errors.schedule.message}</p>}
             </div>
             <div className="space-y-1">
               <Label>GST Rate (%)</Label>
@@ -287,17 +332,20 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
               <Input {...register('composition')} placeholder="Active ingredients" />
             </div>
             <div className="space-y-1">
-              <Label>HSN Code</Label>
+              <Label>{ff.label('hsnCode', 'HSN Code')} <span className="text-destructive">*</span></Label>
               <Input {...register('hsn')} placeholder="e.g. 30049099" />
+              {errors.hsn && <p className="text-xs text-destructive">{errors.hsn.message}</p>}
             </div>
-            <div className="space-y-1">
-              <Label>Reorder Level</Label>
-              <Input type="number" {...register('reorderLevel')} placeholder="Minimum stock quantity" />
-            </div>
+            {ff.isEnabled('reorderLevel') && (
+              <div className="space-y-1">
+                <Label>{ff.label('reorderLevel', 'Reorder Level')}</Label>
+                <Input type="number" {...register('reorderLevel')} placeholder="Minimum stock quantity" />
+              </div>
+            )}
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={attemptClose}>Cancel</Button>
             <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isEdit ? 'Save Changes' : 'Add Medicine'}
@@ -306,5 +354,23 @@ export function AddMedicineDialog({ open, onOpenChange, medicine }: Props) {
         </form>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+          <AlertDialogDescription>
+            You have unsaved changes. Are you sure you want to cancel? Your entries will be lost.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep editing</AlertDialogCancel>
+          <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={discardAndClose}>
+            Discard changes
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

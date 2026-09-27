@@ -178,8 +178,9 @@ export function AuditView() {
 
   function exportAuditCSV() {
     const headers = ['Time', 'User', 'Role', 'Module', 'Action', 'Status', 'Severity', 'Description', 'IP'];
-    const rows = logsResult.data.map(l => [formatDateTime(l.createdAt), l.userName, l.userRole, l.module, l.action, l.status, l.severity, `"${l.description}"`, l.ipAddress ?? ''].join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
+    const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = logsResult.data.map(l => [formatDateTime(l.createdAt), l.userName, l.userRole, l.module, l.action, l.status, l.severity, l.description, l.ipAddress ?? ''].map(q).join(','));
+    const csv = [headers.map(q).join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

@@ -316,6 +316,7 @@ enum AuditModule {
   report
   customer
   reorder
+  platform
 }
 
 enum AuditAction {
@@ -362,100 +363,120 @@ enum Gender {
 // ─── Tenant (Organisation) ────────────────────────────────────────────────────
 
 model Tenant {
-  id                  String       @id @default(uuid())
-  name                String
-  slug                String       @unique
-  type                TenantType   @default(retail)
-  status              TenantStatus @default(trial)
-  plan                TenantPlan   @default(starter)
-  phone               String?
-  email               String?
-  logoUrl             String?
-  licenseNumber       String?
-  gstNumber           String?
-  drugLicenseNumber   String?
-  drugLicenseExpiry   DateTime?
-  addressLine1        String?
-  addressLine2        String?
-  city                String?
-  state               String?
-  pincode             String?
-  country             String       @default("India")
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  deletedAt           DateTime?
+  id                String       @id @default(uuid())
+  name              String
+  slug              String       @unique
+  type              TenantType   @default(retail)
+  status            TenantStatus @default(trial)
+  plan              TenantPlan   @default(starter)
+  ownerName         String?
+  phone             String?
+  mobile            String?
+  email             String?
+  logoUrl           String?
+  licenseNumber     String?
+  gstNumber         String?
+  drugLicenseNumber String?
+  drugLicenseExpiry DateTime?
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  state             String?
+  pincode           String?
+  country           String       @default("India")
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
 
   // Settings (denormalized for fast reads)
-  currency            String       @default("INR")
-  timezone            String       @default("Asia/Kolkata")
-  dateFormat          String       @default("DD/MM/YYYY")
-  lowStockThreshold   Int          @default(10)
-  expiryAlertDays     Int          @default(90)
-  autoBackup          Boolean      @default(true)
-  printBillDefault    Boolean      @default(true)
-  requirePrescription Boolean      @default(false)
-  enableOfflineMode   Boolean      @default(false)
-  gstEnabled          Boolean      @default(true)
-  sessionTimeout      Int          @default(30)
-  language            String       @default("en")
+  currency            String  @default("INR")
+  timezone            String  @default("Asia/Kolkata")
+  dateFormat          String  @default("DD/MM/YYYY")
+  lowStockThreshold   Int     @default(10)
+  expiryAlertDays     Int     @default(90)
+  autoBackup          Boolean @default(true)
+  printBillDefault    Boolean @default(true)
+  requirePrescription Boolean @default(false)
+  enableOfflineMode   Boolean @default(false)
+  gstEnabled          Boolean @default(true)
+  sessionTimeout      Int     @default(30)
+  language            String  @default("en")
   upiId               String?
-  creditLimit         Int          @default(5000)
-  acceptCash          Boolean      @default(true)
-  acceptUPI           Boolean      @default(true)
-  acceptCard          Boolean      @default(true)
-  acceptCredit        Boolean      @default(true)
+  creditLimit         Int     @default(5000)
+  acceptCash          Boolean @default(true)
+  acceptUPI           Boolean @default(true)
+  acceptCard          Boolean @default(true)
+  acceptCredit        Boolean @default(true)
 
   // GST / Tax settings
-  defaultGST          Float        @default(12)
-  gstRegistered       Boolean      @default(true)
+  defaultGST    Float   @default(12)
+  gstRegistered Boolean @default(true)
 
   // Billing settings
-  printReceiptOnSale  Boolean      @default(true)
-  showGSTOnReceipt    Boolean      @default(true)
-  showGenericName     Boolean      @default(true)
-  termsOnReceipt      String?
-  thankYouMessage     String?
+  printReceiptOnSale Boolean @default(true)
+  showGSTOnReceipt   Boolean @default(true)
+  showGenericName    Boolean @default(true)
+  termsOnReceipt     String?
+  thankYouMessage    String?
 
   // Notification settings
-  lowStockAlert       Boolean      @default(true)
-  expiryAlert         Boolean      @default(true)
-  reorderAlert        Boolean      @default(true)
-  dailyReport         Boolean      @default(true)
-  weeklyReport        Boolean      @default(true)
-  monthlyReport       Boolean      @default(false)
-  emailAlerts         Boolean      @default(false)
-  smsAlerts           Boolean      @default(false)
-  whatsappAlerts      Boolean      @default(false)
-  alertEmail          String?
-  alertPhone          String?
+  lowStockAlert  Boolean @default(true)
+  expiryAlert    Boolean @default(true)
+  reorderAlert   Boolean @default(true)
+  dailyReport    Boolean @default(true)
+  weeklyReport   Boolean @default(true)
+  monthlyReport  Boolean @default(false)
+  emailAlerts    Boolean @default(false)
+  smsAlerts      Boolean @default(false)
+  whatsappAlerts Boolean @default(false)
+  alertEmail     String?
+  alertPhone     String?
 
   // Admin-configurable message templates ({{variable}} placeholders), per tenant
-  messageTemplates    Json?
+  messageTemplates Json?
 
   // Support contact shown in the in-app help assistant (email or ticket URL)
-  supportContact      String?
+  supportContact String?
+
+  // Admin-configurable dropdown option lists, per tenant ({ key: string[] }).
+  // e.g. medicineCategory, medicineForm, medicineUnit — overrides built-in defaults.
+  dropdownOptions Json?
+
+  // Per-tenant receipt/print configuration (toggles for doctor, batch, expiry,
+  // GST breakdown, savings, cashier, phone, QR, powered-by, compact mode).
+  receiptConfig Json?
+
+  // Per-tenant menu visibility per role ({ roleName: { menuKey: boolean } }).
+  menuAccess Json?
+
+  // Per-tenant form-field configuration ({ formKey: { fieldKey: {...} } }).
+  formFields Json?
 
   // Relations
-  users               User[]
-  roles               Role[]
-  medicines           Medicine[]
-  inventoryItems      InventoryItem[]
-  stockMovements      StockMovement[]
-  bills               Bill[]
-  customers           Customer[]
-  vendors             Vendor[]
-  purchaseInvoices    PurchaseInvoice[]
-  vendorPayments      VendorPayment[]
-  prescriptions       Prescription[]
-  returns             ReturnRequest[]
-  notifications       Notification[]
-  reorderItems        ReorderItem[]
-  reorderAlerts       ReorderAlert[]
-  auditLogs           AuditLog[]
-  userSessions        UserSession[]
-  securityEvents      SecurityEvent[]
-  refillReminders     RefillReminder[]
-  scheduleRegister    ScheduleDrugRegister[]
+  users            User[]
+  roles            Role[]
+  medicines        Medicine[]
+  inventoryItems   InventoryItem[]
+  stockMovements   StockMovement[]
+  bills            Bill[]
+  customers        Customer[]
+  vendors          Vendor[]
+  purchaseInvoices PurchaseInvoice[]
+  purchaseOrders   PurchaseOrder[]
+  deliveryOrders   DeliveryOrder[]
+  stockTransfers   StockTransfer[]
+  dayCloses        DayClose[]
+  vendorPayments   VendorPayment[]
+  prescriptions    Prescription[]
+  returns          ReturnRequest[]
+  notifications    Notification[]
+  reorderItems     ReorderItem[]
+  reorderAlerts    ReorderAlert[]
+  auditLogs        AuditLog[]
+  userSessions     UserSession[]
+  securityEvents   SecurityEvent[]
+  refillReminders  RefillReminder[]
+  scheduleRegister ScheduleDrugRegister[]
 
   @@map("tenants")
 }
@@ -475,6 +496,7 @@ model User {
   avatarUrl           String?
   lastLoginAt         DateTime?
   passwordChangedAt   DateTime?
+  mustChangePassword  Boolean    @default(false)
   failedLoginAttempts Int        @default(0)
   lockedUntil         DateTime?
   createdBy           String?
@@ -483,12 +505,12 @@ model User {
   updatedAt           DateTime   @updatedAt
   deletedAt           DateTime?
 
-  tenant              Tenant     @relation(fields: [tenantId], references: [id])
-  userRoles           UserRole[]
-  refreshTokens       RefreshToken[]
-  otpCodes            OtpCode[]
-  auditLogs           AuditLog[]
-  userSessions        UserSession[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  userRoles     UserRole[]
+  refreshTokens RefreshToken[]
+  otpCodes      OtpCode[]
+  auditLogs     AuditLog[]
+  userSessions  UserSession[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -499,15 +521,15 @@ model User {
 // ─── Role & Permissions ────────────────────────────────────────────────────────
 
 model Role {
-  id          String           @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    String
   name        String
   description String?
-  isSystem    Boolean          @default(false)
+  isSystem    Boolean   @default(false)
   createdBy   String?
   updatedBy   String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   tenant      Tenant           @relation(fields: [tenantId], references: [id])
@@ -520,12 +542,12 @@ model Role {
 }
 
 model Permission {
-  id          String           @id @default(uuid())
+  id          String   @id @default(uuid())
   module      String
   action      String
   resource    String
   description String?
-  createdAt   DateTime         @default(now())
+  createdAt   DateTime @default(now())
 
   rolePermissions RolePermission[]
 
@@ -537,19 +559,19 @@ model RolePermission {
   roleId       String
   permissionId String
 
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
 }
 
 model UserRole {
-  userId    String
-  roleId    String
+  userId String
+  roleId String
 
-  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
   @@map("user_roles")
@@ -558,16 +580,16 @@ model UserRole {
 // ─── Auth Tokens ────────────────────────────────────────────────────────────
 
 model RefreshToken {
-  id          String   @id @default(uuid())
-  userId      String
-  token       String   @unique
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  deviceInfo  String?
-  ipAddress   String?
-  createdAt   DateTime @default(now())
+  id         String    @id @default(uuid())
+  userId     String
+  token      String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  deviceInfo String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([token])
@@ -575,15 +597,15 @@ model RefreshToken {
 }
 
 model OtpCode {
-  id         String   @id @default(uuid())
-  userId     String
-  code       String
-  purpose    String
-  expiresAt  DateTime
-  usedAt     DateTime?
-  createdAt  DateTime @default(now())
+  id        String    @id @default(uuid())
+  userId    String
+  code      String
+  purpose   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("otp_codes")
@@ -592,43 +614,45 @@ model OtpCode {
 // ─── Medicine ─────────────────────────────────────────────────────────────────
 
 model Medicine {
-  id                  String          @id @default(uuid())
-  tenantId            String
-  name                String
-  genericName         String?
-  brandName           String?
-  manufacturer        String?
-  category            MedicineCategory @default(other)
-  form                MedicineForm    @default(tablet)
-  strength            String?
-  unit                MedicineUnit    @default(strip)
-  composition         String?
-  hsn                 String?
-  barcode             String?
-  schedule            DrugSchedule?
-  requiresPrescription Boolean        @default(false)
-  gstRate             Float           @default(12)
-  mrp                 Float           @default(0)
-  purchasePrice       Float           @default(0)
-  sellingPrice        Float           @default(0)
-  reorderLevel        Int             @default(10)
-  description         String?
-  sideEffects         String?
-  storage             String?
-  status              MedicineStatus  @default(active)
-  createdBy           String?
-  updatedBy           String?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  deletedAt           DateTime?
+  id                   String           @id @default(uuid())
+  tenantId             String
+  name                 String
+  genericName          String?
+  brandName            String?
+  manufacturer         String?
+  category             MedicineCategory @default(other)
+  form                 MedicineForm     @default(tablet)
+  strength             String?
+  unit                 MedicineUnit     @default(strip)
+  unitsPerPack         Int              @default(1) // tablets/capsules per strip/pack (1 = sold whole, e.g. syrup)
+  composition          String?
+  hsn                  String?
+  barcode              String?
+  schedule             DrugSchedule?
+  requiresPrescription Boolean          @default(false)
+  gstRate              Float            @default(12)
+  mrp                  Decimal          @default(0) @db.Decimal(12, 2)
+  purchasePrice        Decimal          @default(0) @db.Decimal(12, 2)
+  sellingPrice         Decimal          @default(0) @db.Decimal(12, 2)
+  reorderLevel         Int              @default(10)
+  description          String?
+  sideEffects          String?
+  storage              String?
+  status               MedicineStatus   @default(active)
+  createdBy            String?
+  updatedBy            String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  deletedAt            DateTime?
 
-  tenant              Tenant          @relation(fields: [tenantId], references: [id])
-  inventoryItems      InventoryItem[]
-  stockMovements      StockMovement[]
-  billItems           BillItem[]
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id])
+  inventoryItems        InventoryItem[]
+  stockMovements        StockMovement[]
+  billItems             BillItem[]
   prescriptionMedicines PrescriptionMedicine[]
-  returnItems         ReturnItem[]
-  reorderItems        ReorderItem[]
+  returnItems           ReturnItem[]
+  reorderItems          ReorderItem[]
+  purchaseOrderItems    PurchaseOrderItem[]
 
   @@index([tenantId])
   @@index([tenantId, category])
@@ -643,11 +667,12 @@ model InventoryItem {
   tenantId          String
   medicineId        String
   batchNumber       String
-  quantity          Int             @default(0)
+  quantity          Int             @default(0) // whole packs/strips on hand
   reservedQuantity  Int             @default(0)
-  purchasePrice     Float
-  mrp               Float
-  sellingPrice      Float
+  looseUnits        Int             @default(0) // loose units from an opened pack (< unitsPerPack)
+  purchasePrice     Decimal         @db.Decimal(12, 2)
+  mrp               Decimal         @db.Decimal(12, 2)
+  sellingPrice      Decimal         @db.Decimal(12, 2)
   manufacturingDate DateTime?
   expiryDate        DateTime
   supplierId        String?
@@ -663,10 +688,10 @@ model InventoryItem {
   updatedAt         DateTime        @updatedAt
   deletedAt         DateTime?
 
-  tenant            Tenant          @relation(fields: [tenantId], references: [id])
-  medicine          Medicine        @relation(fields: [medicineId], references: [id])
-  billItems         BillItem[]
-  stockMovements    StockMovement[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  medicine       Medicine        @relation(fields: [medicineId], references: [id])
+  billItems      BillItem[]
+  stockMovements StockMovement[]
 
   @@index([tenantId])
   @@index([medicineId])
@@ -676,7 +701,7 @@ model InventoryItem {
 }
 
 model StockMovement {
-  id              String       @id @default(uuid())
+  id              String          @id @default(uuid())
   tenantId        String
   medicineId      String
   inventoryItemId String?
@@ -689,11 +714,11 @@ model StockMovement {
   referenceType   String?
   notes           String?
   createdBy       String?
-  createdAt       DateTime     @default(now())
+  createdAt       DateTime        @default(now())
 
-  tenant          Tenant       @relation(fields: [tenantId], references: [id])
-  medicine        Medicine     @relation(fields: [medicineId], references: [id])
-  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  medicine      Medicine       @relation(fields: [medicineId], references: [id])
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id])
 
   @@index([tenantId])
   @@index([medicineId])
@@ -704,36 +729,36 @@ model StockMovement {
 // ─── Billing ──────────────────────────────────────────────────────────────────
 
 model Bill {
-  id              String        @id @default(uuid())
+  id              String         @id @default(uuid())
   tenantId        String
   billNumber      String
-  type            BillType      @default(sale)
-  status          BillStatus    @default(draft)
+  type            BillType       @default(sale)
+  status          BillStatus     @default(draft)
   customerName    String?
   customerPhone   String?
   customerEmail   String?
   customerId      String?
   doctor          String?
   prescriptionId  String?
-  subtotal        Float         @default(0)
-  discountAmount  Float         @default(0)
-  discountPercent Float         @default(0)
-  taxAmount       Float         @default(0)
-  totalAmount     Float         @default(0)
-  paidAmount      Float         @default(0)
-  balanceAmount   Float         @default(0)
+  subtotal        Decimal        @default(0) @db.Decimal(12, 2)
+  discountAmount  Decimal        @default(0) @db.Decimal(12, 2)
+  discountPercent Float          @default(0)
+  taxAmount       Decimal        @default(0) @db.Decimal(12, 2)
+  totalAmount     Decimal        @default(0) @db.Decimal(12, 2)
+  paidAmount      Decimal        @default(0) @db.Decimal(12, 2)
+  balanceAmount   Decimal        @default(0) @db.Decimal(12, 2)
   paymentMethod   PaymentMethod?
   notes           String?
   createdBy       String?
   updatedBy       String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
 
-  tenant          Tenant        @relation(fields: [tenantId], references: [id])
-  customer        Customer?     @relation(fields: [customerId], references: [id])
-  items           BillItem[]
-  returns         ReturnRequest[]
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  customer Customer?       @relation(fields: [customerId], references: [id])
+  items    BillItem[]
+  returns  ReturnRequest[]
 
   @@unique([tenantId, billNumber])
   @@index([tenantId])
@@ -743,7 +768,7 @@ model Bill {
 }
 
 model BillItem {
-  id              String        @id @default(uuid())
+  id              String   @id @default(uuid())
   billId          String
   medicineId      String
   inventoryItemId String?
@@ -752,16 +777,18 @@ model BillItem {
   batchNumber     String
   expiryDate      DateTime
   quantity        Int
-  mrp             Float
-  sellingPrice    Float
-  discount        Float         @default(0)
-  gstRate         Float         @default(0)
-  gstAmount       Float         @default(0)
-  totalAmount     Float
+  saleUnit        String   @default("pack") // "pack" (strip/whole) or "unit" (loose tablet/capsule)
+  unitsPerPack    Int      @default(1)
+  mrp             Decimal  @db.Decimal(12, 2)
+  sellingPrice    Decimal  @db.Decimal(12, 2)
+  discount        Decimal  @default(0) @db.Decimal(12, 2)
+  gstRate         Float    @default(0)
+  gstAmount       Decimal  @default(0) @db.Decimal(12, 2)
+  totalAmount     Decimal  @db.Decimal(12, 2)
 
-  bill            Bill          @relation(fields: [billId], references: [id], onDelete: Cascade)
-  medicine        Medicine      @relation(fields: [medicineId], references: [id])
-  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  bill          Bill           @relation(fields: [billId], references: [id], onDelete: Cascade)
+  medicine      Medicine       @relation(fields: [medicineId], references: [id])
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id])
 
   @@index([billId])
   @@map("bill_items")
@@ -770,7 +797,7 @@ model BillItem {
 // ─── Customer ─────────────────────────────────────────────────────────────────
 
 model Customer {
-  id                String        @id @default(uuid())
+  id                String         @id @default(uuid())
   tenantId          String
   name              String
   phone             String?
@@ -782,24 +809,24 @@ model Customer {
   medicalConditions String[]
   allergies         String[]
   notes             String?
-  loyaltyPoints     Int           @default(0)
-  totalPurchases    Int           @default(0)
-  totalSpend        Float         @default(0)
-  creditBalance     Float         @default(0)
+  loyaltyPoints     Int            @default(0)
+  totalPurchases    Int            @default(0)
+  totalSpend        Decimal        @default(0) @db.Decimal(12, 2)
+  creditBalance     Decimal        @default(0) @db.Decimal(12, 2)
   lastVisitDate     DateTime?
-  totalVisits       Int           @default(0)
-  customerType      CustomerType  @default(regular)
+  totalVisits       Int            @default(0)
+  customerType      CustomerType   @default(regular)
   status            CustomerStatus @default(active)
   createdBy         String?
   updatedBy         String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   deletedAt         DateTime?
 
-  tenant            Tenant        @relation(fields: [tenantId], references: [id])
-  bills             Bill[]
-  prescriptions     Prescription[]
-  refillReminders   RefillReminder[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  bills           Bill[]
+  prescriptions   Prescription[]
+  refillReminders RefillReminder[]
 
   @@index([tenantId])
   @@index([tenantId, customerType])
@@ -809,68 +836,69 @@ model Customer {
 // ─── Vendor ───────────────────────────────────────────────────────────────────
 
 model Vendor {
-  id              String           @id @default(uuid())
-  tenantId        String
-  name            String
-  gstNumber       String?
-  phone           String?
-  email           String?
-  address         String?
-  city            String?
-  state           String?
-  pincode         String?
-  contactPerson   String?
-  paymentTerms    String?
-  creditLimit     Float            @default(0)
-  totalPurchases  Float            @default(0)
-  pendingPayment  Float            @default(0)
-  lastOrderDate   DateTime?
-  rating          Float            @default(4.0)
-  status          VendorStatus     @default(active)
-  createdBy       String?
-  updatedBy       String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  deletedAt       DateTime?
+  id             String       @id @default(uuid())
+  tenantId       String
+  name           String
+  gstNumber      String?
+  phone          String?
+  email          String?
+  address        String?
+  city           String?
+  state          String?
+  pincode        String?
+  contactPerson  String?
+  paymentTerms   String?
+  creditLimit    Decimal      @default(0) @db.Decimal(12, 2)
+  totalPurchases Decimal      @default(0) @db.Decimal(12, 2)
+  pendingPayment Decimal      @default(0) @db.Decimal(12, 2)
+  lastOrderDate  DateTime?
+  rating         Float        @default(4.0)
+  status         VendorStatus @default(active)
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
   purchaseInvoices PurchaseInvoice[]
-  vendorPayments  VendorPayment[]
-  returns         ReturnRequest[]
+  purchaseOrders   PurchaseOrder[]
+  vendorPayments   VendorPayment[]
+  returns          ReturnRequest[]
 
   @@index([tenantId])
   @@map("vendors")
 }
 
 model PurchaseInvoice {
-  id              String           @id @default(uuid())
-  tenantId        String
-  vendorId        String
-  vendorName      String
-  invoiceNumber   String
-  invoiceDate     DateTime
-  status          PurchaseStatus   @default(draft)
-  subtotal        Float            @default(0)
-  discountAmount  Float            @default(0)
-  taxAmount       Float            @default(0)
-  totalAmount     Float            @default(0)
-  paidAmount      Float            @default(0)
-  pendingAmount   Float            @default(0)
-  paymentDueDate  DateTime?
-  ocrStatus       OcrStatus        @default(pending)
-  mismatchFlag    Boolean          @default(false)
-  notes           String?
-  createdBy       String?
-  updatedBy       String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  deletedAt       DateTime?
+  id             String         @id @default(uuid())
+  tenantId       String
+  vendorId       String
+  vendorName     String
+  invoiceNumber  String
+  invoiceDate    DateTime
+  status         PurchaseStatus @default(draft)
+  subtotal       Decimal        @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal        @default(0) @db.Decimal(12, 2)
+  taxAmount      Decimal        @default(0) @db.Decimal(12, 2)
+  totalAmount    Decimal        @default(0) @db.Decimal(12, 2)
+  paidAmount     Decimal        @default(0) @db.Decimal(12, 2)
+  pendingAmount  Decimal        @default(0) @db.Decimal(12, 2)
+  paymentDueDate DateTime?
+  ocrStatus      OcrStatus      @default(pending)
+  mismatchFlag   Boolean        @default(false)
+  notes          String?
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id])
-  vendor          Vendor           @relation(fields: [vendorId], references: [id])
-  items           PurchaseInvoiceItem[]
-  vendorPayments  VendorPayment[]
-  returns         ReturnRequest[]
+  tenant         Tenant                @relation(fields: [tenantId], references: [id])
+  vendor         Vendor                @relation(fields: [vendorId], references: [id])
+  items          PurchaseInvoiceItem[]
+  vendorPayments VendorPayment[]
+  returns        ReturnRequest[]
 
   @@index([tenantId])
   @@index([vendorId])
@@ -878,43 +906,43 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceItem {
-  id              String          @id @default(uuid())
-  invoiceId       String
-  medicineName    String
-  batchNumber     String
-  expiryDate      DateTime
-  quantity        Int
-  receivedQuantity Int            @default(0)
-  purchasePrice   Float
-  mrp             Float
-  sellingPrice    Float
-  gstRate         Float           @default(12)
-  gstAmount       Float           @default(0)
-  totalAmount     Float
-  mismatch        Boolean         @default(false)
+  id               String   @id @default(uuid())
+  invoiceId        String
+  medicineName     String
+  batchNumber      String
+  expiryDate       DateTime
+  quantity         Int
+  receivedQuantity Int      @default(0)
+  purchasePrice    Decimal  @db.Decimal(12, 2)
+  mrp              Decimal  @db.Decimal(12, 2)
+  sellingPrice     Decimal  @db.Decimal(12, 2)
+  gstRate          Float    @default(12)
+  gstAmount        Decimal  @default(0) @db.Decimal(12, 2)
+  totalAmount      Decimal  @db.Decimal(12, 2)
+  mismatch         Boolean  @default(false)
 
-  invoice         PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
   @@map("purchase_invoice_items")
 }
 
 model VendorPayment {
-  id              String           @id @default(uuid())
+  id              String            @id @default(uuid())
   tenantId        String
   vendorId        String
   invoiceId       String?
-  amount          Float
+  amount          Decimal           @db.Decimal(12, 2)
   paymentDate     DateTime
   paymentMode     VendorPaymentMode
   referenceNumber String?
   notes           String?
   createdBy       String?
-  createdAt       DateTime         @default(now())
+  createdAt       DateTime          @default(now())
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id])
-  vendor          Vendor           @relation(fields: [vendorId], references: [id])
-  invoice         PurchaseInvoice? @relation(fields: [invoiceId], references: [id])
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  vendor  Vendor           @relation(fields: [vendorId], references: [id])
+  invoice PurchaseInvoice? @relation(fields: [invoiceId], references: [id])
 
   @@index([tenantId])
   @@index([vendorId])
@@ -924,35 +952,35 @@ model VendorPayment {
 // ─── Prescription ─────────────────────────────────────────────────────────────
 
 model Prescription {
-  id                  String              @id @default(uuid())
-  tenantId            String
-  prescriptionNumber  String
-  customerId          String?
-  customerName        String
-  customerPhone       String?
-  doctorName          String
-  doctorRegNumber     String?
-  hospitalName        String?
-  prescriptionDate    DateTime
-  validUntil          DateTime?
-  status              PrescriptionStatus  @default(pending_review)
-  imageUrl            String?
-  imageType           String?
-  billId              String?
-  billNumber          String?
-  notes               String?
-  reviewedBy          String?
-  reviewedAt          DateTime?
-  rejectionReason     String?
-  createdBy           String?
-  updatedBy           String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  deletedAt           DateTime?
+  id                 String             @id @default(uuid())
+  tenantId           String
+  prescriptionNumber String
+  customerId         String?
+  customerName       String
+  customerPhone      String?
+  doctorName         String
+  doctorRegNumber    String?
+  hospitalName       String?
+  prescriptionDate   DateTime
+  validUntil         DateTime?
+  status             PrescriptionStatus @default(pending_review)
+  imageUrl           String?
+  imageType          String?
+  billId             String?
+  billNumber         String?
+  notes              String?
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  rejectionReason    String?
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  deletedAt          DateTime?
 
-  tenant              Tenant              @relation(fields: [tenantId], references: [id])
-  customer            Customer?           @relation(fields: [customerId], references: [id])
-  medicines           PrescriptionMedicine[]
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id])
+  customer  Customer?              @relation(fields: [customerId], references: [id])
+  medicines PrescriptionMedicine[]
 
   @@unique([tenantId, prescriptionNumber])
   @@index([tenantId])
@@ -961,20 +989,20 @@ model Prescription {
 }
 
 model PrescriptionMedicine {
-  id            String       @id @default(uuid())
+  id             String  @id @default(uuid())
   prescriptionId String
-  medicineId    String?
-  medicineName  String
-  genericName   String?
-  dosage        String
-  frequency     String
-  duration      String
-  quantity      Int?
-  instructions  String?
-  dispensed     Boolean      @default(false)
+  medicineId     String?
+  medicineName   String
+  genericName    String?
+  dosage         String
+  frequency      String
+  duration       String
+  quantity       Int?
+  instructions   String?
+  dispensed      Boolean @default(false)
 
-  prescription  Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
-  medicine      Medicine?    @relation(fields: [medicineId], references: [id])
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicine     Medicine?    @relation(fields: [medicineId], references: [id])
 
   @@index([prescriptionId])
   @@map("prescription_medicines")
@@ -983,38 +1011,38 @@ model PrescriptionMedicine {
 // ─── Returns ──────────────────────────────────────────────────────────────────
 
 model ReturnRequest {
-  id                   String        @id @default(uuid())
-  tenantId             String
-  returnNumber         String
-  type                 ReturnType
-  status               ReturnStatus  @default(pending)
-  billId               String?
-  billNumber           String?
-  customerId           String?
-  customerName         String?
-  customerPhone        String?
-  vendorId             String?
-  vendorName           String?
-  purchaseInvoiceId    String?
+  id                    String        @id @default(uuid())
+  tenantId              String
+  returnNumber          String
+  type                  ReturnType
+  status                ReturnStatus  @default(pending)
+  billId                String?
+  billNumber            String?
+  customerId            String?
+  customerName          String?
+  customerPhone         String?
+  vendorId              String?
+  vendorName            String?
+  purchaseInvoiceId     String?
   purchaseInvoiceNumber String?
-  totalAmount          Float         @default(0)
-  refundAmount         Float         @default(0)
-  refundMethod         RefundMethod?
-  reason               ReturnReason
-  reasonNotes          String?
-  processedBy          String?
-  processedAt          DateTime?
-  createdBy            String?
-  updatedBy            String?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  deletedAt            DateTime?
+  totalAmount           Decimal       @default(0) @db.Decimal(12, 2)
+  refundAmount          Decimal       @default(0) @db.Decimal(12, 2)
+  refundMethod          RefundMethod?
+  reason                ReturnReason
+  reasonNotes           String?
+  processedBy           String?
+  processedAt           DateTime?
+  createdBy             String?
+  updatedBy             String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  deletedAt             DateTime?
 
-  tenant               Tenant        @relation(fields: [tenantId], references: [id])
-  bill                 Bill?         @relation(fields: [billId], references: [id])
-  vendor               Vendor?       @relation(fields: [vendorId], references: [id])
-  purchaseInvoice      PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
-  items                ReturnItem[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  bill            Bill?            @relation(fields: [billId], references: [id])
+  vendor          Vendor?          @relation(fields: [vendorId], references: [id])
+  purchaseInvoice PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  items           ReturnItem[]
 
   @@unique([tenantId, returnNumber])
   @@index([tenantId])
@@ -1031,13 +1059,13 @@ model ReturnItem {
   batchNumber  String
   expiryDate   DateTime?
   returnQty    Int
-  unitPrice    Float
-  totalAmount  Float
+  unitPrice    Decimal       @db.Decimal(12, 2)
+  totalAmount  Decimal       @db.Decimal(12, 2)
   condition    ItemCondition
   restocked    Boolean       @default(false)
 
   returnRequest ReturnRequest @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  medicine     Medicine?     @relation(fields: [medicineId], references: [id])
+  medicine      Medicine?     @relation(fields: [medicineId], references: [id])
 
   @@index([returnId])
   @@map("return_items")
@@ -1046,22 +1074,22 @@ model ReturnItem {
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 model Notification {
-  id           String               @id @default(uuid())
-  tenantId     String
-  title        String
-  message      String
-  type         NotificationType
-  category     NotificationCategory
-  priority     NotificationPriority @default(info)
-  isRead       Boolean              @default(false)
-  readAt       DateTime?
-  actionUrl    String?
-  actionLabel  String?
-  entityId     String?
-  entityName   String?
-  createdAt    DateTime             @default(now())
+  id          String               @id @default(uuid())
+  tenantId    String
+  title       String
+  message     String
+  type        NotificationType
+  category    NotificationCategory
+  priority    NotificationPriority @default(info)
+  isRead      Boolean              @default(false)
+  readAt      DateTime?
+  actionUrl   String?
+  actionLabel String?
+  entityId    String?
+  entityName  String?
+  createdAt   DateTime             @default(now())
 
-  tenant       Tenant               @relation(fields: [tenantId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, isRead])
@@ -1071,29 +1099,29 @@ model Notification {
 // ─── Reorder ──────────────────────────────────────────────────────────────────
 
 model ReorderItem {
-  id                  String          @id @default(uuid())
-  tenantId            String
-  medicineId          String
-  medicineName        String
-  genericName         String?
-  currentStock        Int             @default(0)
-  reorderLevel        Int             @default(0)
-  suggestedQty        Int             @default(0)
-  priority            ReorderPriority @default(medium)
-  status              ReorderStatus   @default(pending)
-  lastSaleQty30Days   Int             @default(0)
-  daysStockLeft       Int             @default(0)
-  preferredVendor     String?
-  lastPurchasePrice   Float           @default(0)
-  notes               String?
-  createdBy           String?
-  updatedBy           String?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  id                String          @id @default(uuid())
+  tenantId          String
+  medicineId        String
+  medicineName      String
+  genericName       String?
+  currentStock      Int             @default(0)
+  reorderLevel      Int             @default(0)
+  suggestedQty      Int             @default(0)
+  priority          ReorderPriority @default(medium)
+  status            ReorderStatus   @default(pending)
+  lastSaleQty30Days Int             @default(0)
+  daysStockLeft     Int             @default(0)
+  preferredVendor   String?
+  lastPurchasePrice Decimal         @default(0) @db.Decimal(12, 2)
+  notes             String?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
-  tenant              Tenant          @relation(fields: [tenantId], references: [id])
-  medicine            Medicine        @relation(fields: [medicineId], references: [id])
-  vendorSuggestions   ReorderVendorSuggestion[]
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id])
+  medicine          Medicine                  @relation(fields: [medicineId], references: [id])
+  vendorSuggestions ReorderVendorSuggestion[]
 
   @@unique([tenantId, medicineId])
   @@index([tenantId])
@@ -1101,33 +1129,33 @@ model ReorderItem {
 }
 
 model ReorderVendorSuggestion {
-  id            String      @id @default(uuid())
+  id            String    @id @default(uuid())
   reorderItemId String
   vendorId      String?
   vendorName    String
-  lastPrice     Float
+  lastPrice     Decimal   @db.Decimal(12, 2)
   lastOrderDate DateTime?
-  leadTimeDays  Int         @default(1)
+  leadTimeDays  Int       @default(1)
   reliability   String?
 
-  reorderItem   ReorderItem @relation(fields: [reorderItemId], references: [id], onDelete: Cascade)
+  reorderItem ReorderItem @relation(fields: [reorderItemId], references: [id], onDelete: Cascade)
 
   @@map("reorder_vendor_suggestions")
 }
 
 model ReorderAlert {
-  id             String          @id @default(uuid())
+  id             String           @id @default(uuid())
   tenantId       String
   medicineId     String?
   medicineName   String
   alertType      ReorderAlertType
-  currentQty     Int             @default(0)
-  threshold      Int             @default(0)
-  severity       String          @default("warning")
-  isAcknowledged Boolean         @default(false)
-  createdAt      DateTime        @default(now())
+  currentQty     Int              @default(0)
+  threshold      Int              @default(0)
+  severity       String           @default("warning")
+  isAcknowledged Boolean          @default(false)
+  createdAt      DateTime         @default(now())
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@map("reorder_alerts")
@@ -1136,7 +1164,7 @@ model ReorderAlert {
 // ─── Audit ────────────────────────────────────────────────────────────────────
 
 model AuditLog {
-  id          String       @id @default(uuid())
+  id          String        @id @default(uuid())
   tenantId    String
   userId      String?
   userName    String?
@@ -1154,8 +1182,8 @@ model AuditLog {
   status      AuditStatus   @default(success)
   createdAt   DateTime      @default(now())
 
-  tenant      Tenant        @relation(fields: [tenantId], references: [id])
-  user        User?         @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, module])
@@ -1165,20 +1193,20 @@ model AuditLog {
 }
 
 model UserSession {
-  id            String   @id @default(uuid())
-  tenantId      String
-  userId        String
-  userName      String?
-  userRole      String?
-  loginAt       DateTime @default(now())
-  logoutAt      DateTime?
-  deviceInfo    String?
-  ipAddress     String?
-  isActive      Boolean  @default(true)
-  actionsCount  Int      @default(0)
+  id           String    @id @default(uuid())
+  tenantId     String
+  userId       String
+  userName     String?
+  userRole     String?
+  loginAt      DateTime  @default(now())
+  logoutAt     DateTime?
+  deviceInfo   String?
+  ipAddress    String?
+  isActive     Boolean   @default(true)
+  actionsCount Int       @default(0)
 
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
-  user          User     @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
 
   @@index([tenantId])
   @@index([userId])
@@ -1196,7 +1224,7 @@ model SecurityEvent {
   isResolved  Boolean  @default(false)
   createdAt   DateTime @default(now())
 
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@map("security_events")
@@ -1223,8 +1251,8 @@ model RefillReminder {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  tenant           Tenant       @relation(fields: [tenantId], references: [id])
-  customer         Customer?    @relation(fields: [customerId], references: [id])
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -1257,10 +1285,166 @@ model ScheduleDrugRegister {
   dispensedAt      DateTime     @default(now())
   createdAt        DateTime     @default(now())
 
-  tenant           Tenant       @relation(fields: [tenantId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, schedule])
   @@index([tenantId, dispensedAt])
   @@map("schedule_drug_register")
+}
+
+// ─── Purchase Orders (reorder → vendor → receive stock) ──────────────────────
+
+enum PurchaseOrderStatus {
+  ordered
+  partially_received
+  received
+  cancelled
+}
+
+model PurchaseOrder {
+  id           String              @id @default(uuid())
+  tenantId     String
+  vendorId     String
+  vendorName   String
+  poNumber     String
+  status       PurchaseOrderStatus @default(ordered)
+  orderDate    DateTime            @default(now())
+  expectedDate DateTime?
+  receivedDate DateTime?
+  subtotal     Decimal             @default(0) @db.Decimal(12, 2)
+  taxAmount    Decimal             @default(0) @db.Decimal(12, 2)
+  totalAmount  Decimal             @default(0) @db.Decimal(12, 2)
+  notes        String?
+  createdBy    String?
+  updatedBy    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id])
+  vendor Vendor              @relation(fields: [vendorId], references: [id])
+  items  PurchaseOrderItem[]
+
+  @@index([tenantId])
+  @@index([vendorId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(uuid())
+  poId             String
+  medicineId       String
+  medicineName     String
+  quantity         Int
+  receivedQuantity Int           @default(0)
+  unitCost         Decimal       @db.Decimal(12, 2)
+  gstRate          Float         @default(12)
+  totalAmount      Decimal       @db.Decimal(12, 2)
+  order            PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  medicine         Medicine      @relation(fields: [medicineId], references: [id])
+
+  @@index([poId])
+  @@map("purchase_order_items")
+}
+
+// ─── Delivery Orders (home delivery of sales) ────────────────────────────────
+
+enum DeliveryStatus {
+  pending
+  out_for_delivery
+  delivered
+  cancelled
+}
+
+model DeliveryOrder {
+  id            String         @id @default(uuid())
+  tenantId      String
+  orderNumber   String
+  billId        String?
+  billNumber    String?
+  customerName  String
+  customerPhone String?
+  address       String
+  status        DeliveryStatus @default(pending)
+  assignedTo    String?
+  notes         String?
+  createdBy     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deliveredAt   DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("delivery_orders")
+}
+
+// ─── Stock Transfers (between rack locations / branches) ─────────────────────
+
+enum TransferStatus {
+  pending
+  completed
+  cancelled
+}
+
+model StockTransfer {
+  id              String         @id @default(uuid())
+  tenantId        String
+  transferNumber  String
+  inventoryItemId String?
+  medicineId      String
+  medicineName    String
+  batchNumber     String
+  quantity        Int
+  fromLocation    String?
+  toLocation      String
+  status          TransferStatus @default(completed)
+  notes           String?
+  createdBy       String?
+  createdAt       DateTime       @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("stock_transfers")
+}
+
+// End-of-day cash reconciliation — one record per tenant per business day.
+// Server-authoritative so day-close is enforced and auditable across devices.
+model DayClose {
+  id            String   @id @default(uuid())
+  tenantId      String
+  closeDate     DateTime @db.Date
+  systemCash    Decimal  @default(0) @db.Decimal(12, 2)
+  systemUpi     Decimal  @default(0) @db.Decimal(12, 2)
+  systemCard    Decimal  @default(0) @db.Decimal(12, 2)
+  systemCredit  Decimal  @default(0) @db.Decimal(12, 2)
+  systemTotal   Decimal  @default(0) @db.Decimal(12, 2)
+  physicalCash  Decimal  @default(0) @db.Decimal(12, 2)
+  variance      Decimal  @default(0) @db.Decimal(12, 2)
+  billCount     Int      @default(0)
+  denominations Json?
+  notes         String?
+  closedBy      String?
+  closedByName  String?
+  closedAt      DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, closeDate])
+  @@index([tenantId])
+  @@map("day_closes")
+}
+
+// Per-tenant, per-document-type monotonic counter. An atomic upsert-and-return
+// yields collision-free sequential numbers (e.g. bill numbers) under any level of
+// concurrency — no locks held across the caller's transaction, no retries.
+model DocumentCounter {
+  tenantId  String
+  docType   String
+  nextValue Int    @default(0)
+
+  @@id([tenantId, docType])
+  @@map("document_counters")
 }

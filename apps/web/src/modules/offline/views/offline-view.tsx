@@ -1,54 +1,55 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Wifi, WifiOff, RefreshCw, CheckCircle, Clock, AlertTriangle, HardDrive, Upload, Download } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Wifi, WifiOff, RefreshCw, CheckCircle, Clock, AlertTriangle, HardDrive, Upload, Download, Trash2, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@pharmaos/utils';
+import { useOffline } from '@/hooks/use-offline';
+import { syncQueue } from '@/lib/offline-sync';
+import { getQueue, clearSynced, removeOp, offlineStorageBytes, getCatalog, type QueuedOp } from '@/lib/offline';
 
-const MOCK_SYNC_QUEUE = [
-  { id: 'sq_001', type: 'billing', action: 'CREATE', description: 'Bill INV000047 — Anjali Verma', timestamp: new Date(Date.now() - 3 * 60000).toISOString(), status: 'pending' },
-  { id: 'sq_002', type: 'inventory', action: 'UPDATE', description: 'Stock adjustment — Paracetamol 500mg', timestamp: new Date(Date.now() - 8 * 60000).toISOString(), status: 'pending' },
-  { id: 'sq_003', type: 'billing', action: 'CREATE', description: 'Bill INV000046 — Walk-in Customer', timestamp: new Date(Date.now() - 15 * 60000).toISOString(), status: 'synced' },
-];
+const STATUS_META: Record<QueuedOp['status'], { label: string; icon: React.ElementType; cls: string; badge: 'warning' | 'success' | 'destructive' | 'secondary' }> = {
+  pending: { label: 'Pending', icon: Clock, cls: 'bg-warning/10 text-warning-600', badge: 'warning' },
+  syncing: { label: 'Syncing', icon: RefreshCw, cls: 'bg-primary/10 text-primary', badge: 'secondary' },
+  synced: { label: 'Synced', icon: CheckCircle, cls: 'bg-success/10 text-success', badge: 'success' },
+  failed: { label: 'Failed', icon: AlertTriangle, cls: 'bg-destructive/10 text-destructive', badge: 'destructive' },
+};
 
 export function OfflineView() {
-  const [isOnline, setIsOnline] = useState(true);
-  const [lastSync, setLastSync] = useState<string>(new Date().toISOString());
+  const { online, queue } = useOffline();
   const [syncing, setSyncing] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    function update() { setIsOnline(navigator.onLine); }
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
-    update();
-    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
-  }, []);
+  const pending = queue.filter((q) => q.status === 'pending' || q.status === 'failed' || q.status === 'syncing').length;
+  const synced = queue.filter((q) => q.status === 'synced').length;
+  const failed = queue.filter((q) => q.status === 'failed').length;
+  const cat = getCatalog();
+  const storageKb = (offlineStorageBytes() / 1024).toFixed(1);
 
   async function handleSync() {
+    if (!online) { toast.warning('Still offline — will sync automatically when the connection returns'); return; }
     setSyncing(true);
-    await new Promise((r) => setTimeout(r, 1800));
-    setLastSync(new Date().toISOString());
+    const r = await syncQueue();
     setSyncing(false);
-    toast.success('Sync completed — all records up to date');
+    if (r.synced > 0) toast.success(`Synced ${r.synced} record${r.synced === 1 ? '' : 's'}`);
+    else if (r.failed > 0) toast.error(`${r.failed} record(s) were rejected — review them below`);
+    else toast.success('Everything is already up to date');
   }
 
   function handleExport() {
-    const payload = { exportedAt: new Date().toISOString(), syncQueue: MOCK_SYNC_QUEUE, version: '1.0' };
+    const payload = { exportedAt: new Date().toISOString(), queue: getQueue(), version: '2.0' };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pharmaos-offline-backup-${new Date().toISOString().split('T')[0]}.json`;
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `pharmaos-offline-queue-${new Date().toISOString().split('T')[0]}.json`,
+    });
     a.click();
-    URL.revokeObjectURL(url);
-    toast.success('Offline data exported successfully');
+    toast.success('Offline queue exported');
   }
 
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -56,158 +57,141 @@ export function OfflineView() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        JSON.parse(reader.result as string);
-        toast.success(`Backup imported: ${file.name}`, { description: 'Local data restored successfully.' });
-      } catch {
-        toast.error('Invalid backup file — could not parse JSON');
-      }
+      try { JSON.parse(reader.result as string); toast.success(`Backup read: ${file.name}`, { description: 'Review before syncing.' }); }
+      catch { toast.error('Invalid backup file — could not parse JSON'); }
     };
     reader.readAsText(file);
     e.target.value = '';
   }
 
-  function handleClearCache() {
+  function handleClearSynced() { clearSynced(); toast.success('Cleared synced records'); }
+  function handleClearAll() {
     if (!clearConfirm) { setClearConfirm(true); return; }
-    localStorage.clear();
+    getQueue().forEach((q) => removeOp(q.id));
     setClearConfirm(false);
-    toast.success('Local cache cleared', { description: 'All locally stored data has been removed.' });
+    toast.success('Offline queue cleared');
   }
-
-  const pendingCount = MOCK_SYNC_QUEUE.filter((i) => i.status === 'pending').length;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Offline Mode</h1>
-          <p className="text-sm text-muted-foreground">Manage offline data, sync queue, and local storage</p>
+          <p className="text-sm text-muted-foreground">Bills made without internet are saved here and sync automatically when you&apos;re back online</p>
         </div>
-        <Button onClick={handleSync} disabled={syncing || !isOnline} className="gap-2">
+        <Button onClick={handleSync} disabled={syncing || pending === 0 || !online} className="gap-2">
           <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
           {syncing ? 'Syncing…' : 'Sync Now'}
         </Button>
       </div>
 
-      {/* Connection status banner */}
-      <div className={cn(
-        'flex items-center gap-3 rounded-xl border p-4',
-        isOnline ? 'border-success/30 bg-success/5' : 'border-destructive/30 bg-destructive/5'
-      )}>
-        {isOnline
-          ? <Wifi className="h-5 w-5 text-success" />
-          : <WifiOff className="h-5 w-5 text-destructive" />}
+      {/* Connection status */}
+      <div className={cn('flex items-center gap-3 rounded-xl border p-4', online ? 'border-success/30 bg-success/5' : 'border-destructive/30 bg-destructive/5')}>
+        {online ? <Wifi className="h-5 w-5 text-success" /> : <WifiOff className="h-5 w-5 text-destructive" />}
         <div>
-          <p className={cn('font-semibold', isOnline ? 'text-success-700' : 'text-destructive')}>
-            {isOnline ? 'Connected — Online Mode Active' : 'Offline — Working Locally'}
+          <p className={cn('font-semibold', online ? 'text-success-700' : 'text-destructive')}>
+            {online ? 'Connected — Online' : 'Offline — Working Locally'}
           </p>
           <p className="text-xs text-muted-foreground">
-            {isOnline
-              ? `Last synced: ${formatDateTime(lastSync)}`
-              : 'Changes are being saved locally and will sync when connection is restored'}
+            {online
+              ? (pending > 0 ? `${pending} record(s) waiting to sync` : 'All records are synced')
+              : 'New bills are being saved on this device and will sync when the connection returns'}
           </p>
         </div>
-        <Badge variant={isOnline ? 'success' : 'error'} className="ml-auto">
-          {isOnline ? 'Online' : 'Offline'}
-        </Badge>
+        <Badge variant={online ? 'success' : 'destructive'} className="ml-auto">{online ? 'Online' : 'Offline'}</Badge>
       </div>
 
-      {/* Stats cards */}
+      {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: 'Pending Sync', value: String(pendingCount), icon: Clock, color: pendingCount > 0 ? 'text-warning-600' : 'text-muted-foreground', bg: pendingCount > 0 ? 'bg-warning/10' : 'bg-muted' },
-          { label: 'Synced Records', value: String(MOCK_SYNC_QUEUE.filter((i) => i.status === 'synced').length), icon: CheckCircle, color: 'text-success', bg: 'bg-success/10' },
-          { label: 'Local Storage', value: '2.4 MB', icon: HardDrive, color: 'text-primary', bg: 'bg-primary/10' },
-          { label: 'Last Sync', value: formatDateTime(lastSync).split(',')[1]?.trim() ?? '—', icon: RefreshCw, color: 'text-muted-foreground', bg: 'bg-muted' },
+          { label: 'Pending Sync', value: String(pending), icon: Clock, color: pending > 0 ? 'text-warning-600' : 'text-muted-foreground', bg: pending > 0 ? 'bg-warning/10' : 'bg-muted' },
+          { label: 'Synced', value: String(synced), icon: CheckCircle, color: 'text-success', bg: 'bg-success/10' },
+          { label: 'Cached Catalogue', value: cat ? `${(cat.medicines as unknown[]).length} meds` : '—', icon: Package, color: 'text-primary', bg: 'bg-primary/10' },
+          { label: 'Local Storage', value: `${storageKb} KB`, icon: HardDrive, color: 'text-muted-foreground', bg: 'bg-muted' },
         ].map(({ label, value, icon: Icon, color, bg }) => (
           <div key={label} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-            <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', bg)}>
-              <Icon className={cn('h-4 w-4', color)} />
-            </div>
-            <div>
-              <p className="text-base font-bold leading-tight">{value}</p>
-              <p className="text-xs text-muted-foreground">{label}</p>
-            </div>
+            <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', bg)}><Icon className={cn('h-4 w-4', color)} /></div>
+            <div><p className="text-base font-bold leading-tight">{value}</p><p className="text-xs text-muted-foreground">{label}</p></div>
           </div>
         ))}
       </div>
 
+      {failed > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-xs text-destructive">{failed} bill(s) were rejected by the server on sync (e.g. stock changed while offline). Review each below and re-enter it in Billing if needed, then remove it from the queue.</p>
+        </div>
+      )}
+
       {/* Sync queue */}
       <Card>
-        <CardHeader>
-          <CardTitle>Sync Queue</CardTitle>
-          <CardDescription>Operations performed offline waiting to sync</CardDescription>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>Sync Queue</CardTitle>
+            <CardDescription>Bills saved offline, waiting to reach the server</CardDescription>
+          </div>
+          {synced > 0 && <Button variant="ghost" size="sm" className="text-xs" onClick={handleClearSynced}>Clear synced</Button>}
         </CardHeader>
         <CardContent>
-          {MOCK_SYNC_QUEUE.length === 0 ? (
+          {queue.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground">
               <CheckCircle className="mx-auto mb-2 h-8 w-8 text-success" />
-              <p className="text-sm">All records are synced</p>
+              <p className="text-sm">Nothing queued — all sales are on the server</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {MOCK_SYNC_QUEUE.map((item) => (
-                <div key={item.id} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-                  <div className={cn(
-                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-                    item.status === 'pending' ? 'bg-warning/10' : 'bg-success/10'
-                  )}>
-                    {item.status === 'pending'
-                      ? <Clock className="h-4 w-4 text-warning-600" />
-                      : <CheckCircle className="h-4 w-4 text-success" />}
+              {queue.slice().reverse().map((item) => {
+                const m = STATUS_META[item.status];
+                const Icon = m.icon;
+                return (
+                  <div key={item.id} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                    <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', m.cls)}>
+                      <Icon className={cn('h-4 w-4', item.status === 'syncing' && 'animate-spin')} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{item.label}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {item.type} · {formatDateTime(item.createdAt)}
+                        {item.billNumber ? ` · ${item.billNumber}` : ''}
+                        {item.error ? ` · ${item.error}` : ''}
+                      </p>
+                    </div>
+                    <Badge variant={m.badge} className="shrink-0 text-xs">{m.label}</Badge>
+                    {(item.status === 'synced' || item.status === 'failed') && (
+                      <button onClick={() => removeOp(item.id)} title="Remove from queue" className="text-muted-foreground hover:text-destructive">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{item.description}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {item.type} · {item.action} · {formatDateTime(item.timestamp)}
-                    </p>
-                  </div>
-                  <Badge variant={item.status === 'pending' ? 'warning' : 'success'} className="shrink-0 text-xs">
-                    {item.status}
-                  </Badge>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Storage management */}
+      {/* Data management */}
       <Card>
         <CardHeader>
-          <CardTitle>Local Data Management</CardTitle>
-          <CardDescription>Export or clear locally cached data</CardDescription>
+          <CardTitle>Local Data</CardTitle>
+          <CardDescription>Back up or clear the offline queue on this device</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border border-border p-4">
-            <div>
-              <p className="text-sm font-medium">Export Offline Data</p>
-              <p className="text-xs text-muted-foreground">Download all local data as JSON backup</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4" /> Export
-            </Button>
+            <div><p className="text-sm font-medium">Export Queue</p><p className="text-xs text-muted-foreground">Download the pending queue as a JSON backup</p></div>
+            <Button variant="outline" size="sm" onClick={handleExport}><Download className="h-4 w-4" /> Export</Button>
           </div>
           <div className="flex items-center justify-between rounded-lg border border-border p-4">
-            <div>
-              <p className="text-sm font-medium">Import Offline Data</p>
-              <p className="text-xs text-muted-foreground">Restore from a previously exported backup (.json)</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="h-4 w-4" /> Import
-            </Button>
+            <div><p className="text-sm font-medium">Import Queue</p><p className="text-xs text-muted-foreground">Read a previously exported backup (.json)</p></div>
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}><Upload className="h-4 w-4" /> Import</Button>
             <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
           </div>
           <div className="flex items-center justify-between rounded-lg border border-destructive/20 bg-destructive/5 p-4">
             <div>
-              <p className="text-sm font-medium text-destructive">Clear Local Cache</p>
-              <p className="text-xs text-muted-foreground">
-                {clearConfirm ? 'Click again to confirm — this cannot be undone.' : 'Remove all locally stored data. Cannot be undone.'}
-              </p>
+              <p className="text-sm font-medium text-destructive">Clear Offline Queue</p>
+              <p className="text-xs text-muted-foreground">{clearConfirm ? 'Click again to confirm — unsynced bills will be lost.' : 'Remove all queued records. Unsynced bills cannot be recovered.'}</p>
             </div>
-            <Button variant="destructive" size="sm" onClick={handleClearCache}>
-              {clearConfirm ? 'Confirm Clear' : 'Clear Cache'}
-            </Button>
+            <Button variant="destructive" size="sm" onClick={handleClearAll}>{clearConfirm ? 'Confirm Clear' : 'Clear Queue'}</Button>
           </div>
         </CardContent>
       </Card>

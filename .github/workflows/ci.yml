@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Quality gates: type-check + build (blocking), lint (advisory) ──
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter @pharmaos/api exec prisma generate
+      - name: Type check
+        run: pnpm type-check
+      - name: Lint (advisory)
+        run: pnpm lint
+        continue-on-error: true
+      - name: Build
+        run: pnpm build
+
+  # ── Integration tests against a real PostgreSQL, plus a dependency scan ──
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: pharmaos
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: pharmaos_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U pharmaos -d pharmaos_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pharmaos:ci_password@localhost:5432/pharmaos_ci?schema=public
+      JWT_SECRET: ci-jwt-secret-not-for-production-00000000
+      JWT_REFRESH_SECRET: ci-refresh-secret-not-for-production-1111
+      NODE_ENV: test
+      # Keep the per-IP auth limiter out of the way — suites run many logins.
+      AUTH_RATE_LIMIT_MAX: '100000'
+      API_BASE: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Migrate + generate + seed
+        working-directory: apps/api
+        run: |
+          npx prisma migrate deploy
+          npx prisma generate
+          npx tsx prisma/seed.ts
+          SUPER_ADMIN_EMAIL=ops@pharmaos.test SUPER_ADMIN_PASSWORD=Platform@Ops123 npx tsx scripts/create-platform-admin.ts
+
+      - name: Start API
+        working-directory: apps/api
+        run: |
+          nohup npx tsx src/server.ts > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/health >/dev/null; then echo "API up"; break; fi
+            sleep 2
+          done
+          curl -sf http://localhost:4000/health || (echo "API failed to start"; cat /tmp/api.log; exit 1)
+
+      - name: Integration test suites
+        working-directory: apps/api
+        run: |
+          set -e
+          npx tsx scripts/cross-tenant-security.test.ts
+          npx tsx scripts/db-integrity.test.ts
+          npx tsx scripts/config-safety.test.ts
+          npx tsx scripts/onboarding.test.ts
+          npx tsx scripts/pilot-e2e.test.ts
+          npx tsx scripts/security-scan.test.ts
+          npx tsx scripts/auth-security.test.ts
+
+      - name: Dependency audit (advisory)
+        run: pnpm audit --prod
+        continue-on-error: true

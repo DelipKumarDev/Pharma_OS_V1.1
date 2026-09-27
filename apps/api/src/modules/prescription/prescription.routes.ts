@@ -29,6 +29,11 @@ router.patch('/:id/approve', requirePermission('prescriptions', 'approve'), asyn
 router.patch('/:id/dispense', requirePermission('prescriptions', 'approve'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await prescriptionService.updatePrescriptionStatus(t(req), req.params['id']!, 'dispensed', req.user!.sub)); } catch (err) { next(err); }
 });
+// Revoke a dispensed prescription back to approved (Vinay P10.8) — status-only, no
+// stock side-effects (dispensing doesn't move stock; billing does).
+router.patch('/:id/revoke', requirePermission('prescriptions', 'approve'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await prescriptionService.updatePrescriptionStatus(t(req), req.params['id']!, 'approved', req.user!.sub)); } catch (err) { next(err); }
+});
 router.patch('/:id/reject', requirePermission('prescriptions', 'approve'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { reason } = req.body as { reason?: string };

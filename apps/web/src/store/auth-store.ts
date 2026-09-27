@@ -9,6 +9,7 @@ interface AuthStore {
   setAuth: (user: AuthUser, tokens: AuthTokens) => void;
   clearAuth: () => void;
   updateTokens: (tokens: Partial<AuthTokens>) => void;
+  patchUser: (patch: Partial<AuthUser>) => void;
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -22,6 +23,10 @@ export const useAuthStore = create<AuthStore>()(
       updateTokens: (tokens) =>
         set((state) => ({
           tokens: state.tokens ? { ...state.tokens, ...tokens } : null,
+        })),
+      patchUser: (patch) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, ...patch } : null,
         })),
     }),
     {

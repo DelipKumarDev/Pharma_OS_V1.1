@@ -3,6 +3,10 @@ import { z } from 'zod';
 export const loginSchema = z.object({
   email: z.string().email('Invalid email'),
   password: z.string().min(1, 'Password is required'),
+  // Optional tenant identifier (tenant id OR slug) used ONLY to disambiguate when
+  // the same email exists in multiple pharmacies. It narrows the lookup; it never
+  // grants access (password must still match the user in that tenant). Server-side
+  // the JWT tenant is derived from the resolved user, never from this field.
   tenantId: z.string().optional(),
   rememberMe: z.boolean().optional(),
 });

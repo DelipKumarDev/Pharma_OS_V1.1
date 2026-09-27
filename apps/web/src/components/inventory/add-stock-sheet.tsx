@@ -14,10 +14,13 @@ import { Label } from '@/components/ui/label';
 import type { Medicine, InventoryItem } from '@pharmaos/types';
 import { apiFetch } from '@/lib/api';
 
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
 const schema = z.object({
   medicineId: z.string().min(1, 'Select a medicine'),
   batchNumber: z.string().min(1, 'Batch number is required'),
   quantity: z.coerce.number().min(1, 'Quantity must be at least 1'),
+  unitsPerPack: z.coerce.number().min(1, 'At least 1 unit per strip').max(1000),
   purchasePrice: z.coerce.number().min(0, 'Purchase price is required'),
   mrp: z.coerce.number().min(0.01, 'MRP is required'),
   sellingPrice: z.coerce.number().min(0.01, 'Selling price is required'),
@@ -25,7 +28,11 @@ const schema = z.object({
   expiryDate: z.string().min(1, 'Expiry date is required'),
   supplierName: z.string().min(1, 'Supplier name is required'),
   rackLocation: z.string().optional(),
-});
+})
+  // Expiry must be in the future — never accept a back-dated batch (S4).
+  .refine((d) => d.expiryDate > todayStr(), { path: ['expiryDate'], message: 'Expiry date must be in the future' })
+  // …and after the manufacturing date.
+  .refine((d) => !d.manufacturingDate || d.expiryDate > d.manufacturingDate, { path: ['expiryDate'], message: 'Expiry must be after the manufacturing date' });
 
 type FormValues = z.infer<typeof schema>;
 
@@ -42,6 +49,13 @@ async function fetchMedicinesSearch(q: string): Promise<Medicine[]> {
 }
 
 async function addStock(data: FormValues): Promise<InventoryItem> {
+  // Units-per-strip is a property of the drug (medicine master), so persist it
+  // there first; the batch itself is created via the inventory endpoint.
+  await apiFetch(`/api/medicines/${data.medicineId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unitsPerPack: data.unitsPerPack }),
+  });
   const res = await apiFetch('/api/inventory', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -81,7 +95,8 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
     mutationFn: addStock,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory'] });
-      toast.success('Stock added successfully');
+      qc.invalidateQueries({ queryKey: ['inventory-stats'] });
+      toast.success('Stock added', { description: 'View it under Stock & Inventory → Stock Levels' });
       onOpenChange(false);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -95,10 +110,15 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
     setValue('mrp', med.mrp);
     setValue('sellingPrice', med.sellingPrice);
     setValue('purchasePrice', med.purchasePrice ?? 0);
+    setValue('unitsPerPack', (med as Medicine & { unitsPerPack?: number }).unitsPerPack ?? 1);
   }
 
-  const qty = watch('quantity') ?? 0;
-  const purchasePrice = watch('purchasePrice') ?? 0;
+  // `watch` returns the raw input value (a string), so coerce to numbers before
+  // any arithmetic / .toFixed().
+  const qty = Number(watch('quantity')) || 0;
+  const unitsPerPack = Number(watch('unitsPerPack')) || 1;
+  const purchasePrice = Number(watch('purchasePrice')) || 0;
+  const sellingPrice = Number(watch('sellingPrice')) || 0;
   const totalCost = qty * purchasePrice;
 
   return (
@@ -143,18 +163,31 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
           </div>
 
           {/* Batch and qty */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label>Batch Number <span className="text-destructive">*</span></Label>
               <Input {...register('batchNumber')} placeholder="e.g. PCM2024A" />
               {errors.batchNumber && <p className="text-xs text-destructive">{errors.batchNumber.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Quantity <span className="text-destructive">*</span></Label>
-              <Input type="number" {...register('quantity')} placeholder="Units received" />
+              <Label>Strips / Packs <span className="text-destructive">*</span></Label>
+              <Input type="number" {...register('quantity')} placeholder="e.g. 10" />
               {errors.quantity && <p className="text-xs text-destructive">{errors.quantity.message}</p>}
             </div>
+            <div className="space-y-1">
+              <Label>Units / Strip <span className="text-destructive">*</span></Label>
+              <Input type="number" {...register('unitsPerPack')} placeholder="e.g. 15" />
+              {errors.unitsPerPack && <p className="text-xs text-destructive">{errors.unitsPerPack.message}</p>}
+            </div>
           </div>
+          {qty > 0 && unitsPerPack > 0 && (
+            <div className="-mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <span>Total loose units: <span className="font-semibold text-foreground">{qty * unitsPerPack}</span></span>
+              {sellingPrice > 0 && unitsPerPack > 1 && (
+                <span>Per-unit price: <span className="font-semibold text-foreground">₹{(sellingPrice / unitsPerPack).toFixed(2)}</span> <span className="opacity-70">(strip ₹{sellingPrice.toFixed(2)} ÷ {unitsPerPack})</span></span>
+              )}
+            </div>
+          )}
 
           {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
@@ -165,7 +198,7 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
             </div>
             <div className="space-y-1">
               <Label>Expiry Date <span className="text-destructive">*</span></Label>
-              <Input type="date" {...register('expiryDate')} />
+              <Input type="date" min={todayStr()} {...register('expiryDate')} />
               {errors.expiryDate && <p className="text-xs text-destructive">{errors.expiryDate.message}</p>}
             </div>
           </div>

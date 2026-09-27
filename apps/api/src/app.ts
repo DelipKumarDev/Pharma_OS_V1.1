@@ -30,6 +30,10 @@ import userRoutes from './modules/user/user.routes';
 import rolesRoutes from './modules/user/roles.routes';
 import notificationRoutes from './modules/notification/notification.routes';
 import reorderRoutes from './modules/reorder/reorder.routes';
+import purchaseOrderRoutes from './modules/purchase-order/purchaseOrder.routes';
+import deliveryRoutes from './modules/delivery/delivery.routes';
+import transferRoutes from './modules/transfer/transfer.routes';
+import dayCloseRoutes from './modules/day-close/day-close.routes';
 import auditRoutes from './modules/audit/audit.routes';
 import settingsRoutes from './modules/settings/settings.routes';
 import reportsRoutes from './modules/reports/reports.routes';
@@ -39,6 +43,12 @@ import searchRoutes from './modules/search/search.routes';
 import scanRoutes from './modules/scan/scan.routes';
 
 const app = express();
+
+// Behind exactly one reverse proxy (nginx) in production, so req.ip / rate-limit
+// keys / audit IPs reflect the real client via X-Forwarded-For. Trust ONE hop
+// only — the app is not directly reachable (only nginx is exposed), so a client
+// cannot spoof X-Forwarded-For past it.
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
@@ -60,9 +70,21 @@ app.use(requestLogger);
 // Global rate limiter
 app.use('/api', apiLimiter);
 
-// Health check (no auth)
+// Liveness — process is up (no dependencies checked). Used by container HEALTHCHECK.
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' });
+});
+
+// Readiness — the app can serve traffic (database reachable). Used by
+// orchestrators/load balancers before routing to this instance. 503 when the DB
+// is down so a not-ready instance is taken out of rotation.
+app.get('/health/ready', async (_req: AuthRequest, res: Response) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ready', db: 'up', timestamp: new Date().toISOString() });
+  } catch {
+    res.status(503).json({ status: 'not-ready', db: 'down', timestamp: new Date().toISOString() });
+  }
 });
 
 // API routes
@@ -80,6 +102,10 @@ app.use('/api/users', userRoutes);
 app.use('/api/roles', rolesRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reorder', reorderRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/delivery-orders', deliveryRoutes);
+app.use('/api/transfers', transferRoutes);
+app.use('/api/day-close', dayCloseRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/reports', reportsRoutes);

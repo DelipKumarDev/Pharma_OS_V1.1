@@ -4,6 +4,7 @@ import { prisma } from '../../config/database';
 import { sendSuccess } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
 import { NextFunction, Response } from 'express';
+import { getInventoryStats } from '../inventory/inventory.service';
 
 const router = Router();
 router.use(authenticate);
@@ -27,8 +28,8 @@ async function buildDashboard(tenantId: string): Promise<unknown> {
     const [
       tenant,
       todayAgg, yesterdayAgg,
-      totalMedicines, lowStockCount,
-      expiringSoonCount, activeCustomers,
+      totalMedicines, invStats,
+      activeCustomers,
       pendingPrescriptions, pendingReturns,
       recentBills, topItems, categoryItems,
     ] = await Promise.all([
@@ -42,8 +43,9 @@ async function buildDashboard(tenantId: string): Promise<unknown> {
         _sum: { totalAmount: true }, _count: true,
       }),
       prisma.medicine.count({ where: { tenantId, status: 'active', deletedAt: null } }),
-      prisma.inventoryItem.count({ where: { tenantId, status: 'low_stock', deletedAt: null } }),
-      prisma.inventoryItem.count({ where: { tenantId, expiryStatus: 'expiring_soon', deletedAt: null } }),
+      // Single source of truth for stock counts — same computation the Stock
+      // page header uses, so the dashboard KPIs always match it (TC_018).
+      getInventoryStats(tenantId),
       prisma.customer.count({ where: { tenantId, status: 'active', deletedAt: null } }),
       prisma.prescription.count({ where: { tenantId, status: 'pending_review', deletedAt: null } }),
       prisma.returnRequest.count({ where: { tenantId, status: 'pending', deletedAt: null } }),
@@ -64,9 +66,11 @@ async function buildDashboard(tenantId: string): Promise<unknown> {
       }),
     ]);
 
+    const lowStockCount = invStats.lowStockCount;
+    const expiringSoonCount = invStats.expiringSoonCount;
     const alertDays = tenant?.expiryAlertDays ?? 90;
-    const todayRevenue = todayAgg._sum.totalAmount ?? 0;
-    const yesterdayRevenue = yesterdayAgg._sum.totalAmount ?? 0;
+    const todayRevenue = Number(todayAgg._sum.totalAmount ?? 0);
+    const yesterdayRevenue = Number(yesterdayAgg._sum.totalAmount ?? 0);
     const todayBillsCount = todayAgg._count;
     const yesterdayBillsCount = yesterdayAgg._count;
 
@@ -85,7 +89,7 @@ async function buildDashboard(tenantId: string): Promise<unknown> {
     for (const bill of recentBills) {
       const key = bill.createdAt.toISOString().split('T')[0]!;
       const entry = revenueByDate.get(key);
-      if (entry) { entry.revenue += bill.totalAmount; entry.bills++; }
+      if (entry) { entry.revenue += Number(bill.totalAmount); entry.bills++; }
     }
 
     const revenueChart = Array.from(revenueByDate.entries()).map(([date, v]) => ({ date, ...v }));
@@ -100,7 +104,7 @@ async function buildDashboard(tenantId: string): Promise<unknown> {
     const categoryMap = new Map<string, number>();
     for (const item of categoryItems) {
       const cat = item.medicine?.category ?? 'other';
-      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + item.totalAmount);
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + Number(item.totalAmount));
     }
     const totalCatRevenue = Array.from(categoryMap.values()).reduce((a, b) => a + b, 0);
     const salesByCategory = Array.from(categoryMap.entries())

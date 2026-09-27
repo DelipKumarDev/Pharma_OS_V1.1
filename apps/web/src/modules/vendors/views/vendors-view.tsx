@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
@@ -22,6 +23,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { exportToExcel } from '@/lib/export';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -396,6 +398,7 @@ function RecordPaymentDialog({ vendor, open, onOpenChange }: { vendor: Vendor | 
 }
 
 export function VendorsView() {
+  const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -426,7 +429,7 @@ export function VendorsView() {
   const deactivateMutation = useMutation({
     mutationFn: async (id: string) => {
       const r = await apiFetch(`/api/vendors/${id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'inactive' }),
       });
@@ -443,13 +446,8 @@ export function VendorsView() {
 
   function exportCSV() {
     const headers = ['Name', 'GST', 'Phone', 'City', 'State', 'Total Purchases', 'Pending Payment', 'Rating', 'Status'];
-    const rows = vendors.map(v => [v.name, v.gstNumber ?? '', v.phone, v.city, v.state, v.totalPurchases, v.pendingPayment, v.rating ?? '', v.status].join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `vendors-${new Date().toISOString().split('T')[0]}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    const rows = vendors.map(v => [v.name, v.gstNumber ?? '', v.phone, v.city, v.state, v.totalPurchases, v.pendingPayment, v.rating ?? '', v.status]);
+    exportToExcel(`vendors-${new Date().toISOString().split('T')[0]}`, headers, rows);
     toast.success('Vendor list exported');
   }
 
@@ -541,9 +539,6 @@ export function VendorsView() {
             <DropdownMenuItem onClick={() => setPaymentVendor(row.original)}>
               <Wallet className="h-4 w-4" /> Record Payment
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { setSelectedVendor(row.original); setDetailOpen(true); toast.info('View invoices in the detail panel'); }}>
-              <Upload className="h-4 w-4" /> View Invoices
-            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onClick={() => {
               if (row.original.status === 'inactive') { toast.info('Vendor is already inactive'); return; }
@@ -579,11 +574,7 @@ export function VendorsView() {
           <Button variant="outline" size="sm" onClick={exportCSV}>
             <Download className="h-4 w-4" /> Export
           </Button>
-          <Button variant="outline" size="sm" onClick={() => {
-            const tab = document.querySelector('[data-value="invoices"]') as HTMLButtonElement | null;
-            tab?.click();
-            toast.info('Switch to Purchase Invoices tab to manage invoices');
-          }}>
+          <Button variant="outline" size="sm" onClick={() => router.push('/scan')}>
             <Upload className="h-4 w-4" /> Upload Invoice
           </Button>
           <Button size="sm" onClick={() => setAddOpen(true)}>

@@ -21,7 +21,9 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  logger.error(`${req.method} ${req.path} - ${err.message}`, { stack: err.stack });
+  const requestId = res.locals['requestId'] as string | undefined;
+  const code = err instanceof AppError ? err.statusCode : 500;
+  logger.error(`${req.method} ${req.path} - ${err.message}`, { requestId, code, stack: err.stack });
 
   if (err instanceof AppError) {
     sendError(res, err.message, err.statusCode, err.errors);

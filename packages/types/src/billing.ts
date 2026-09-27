@@ -8,6 +8,9 @@ export interface Bill {
   type: BillType;
   status: BillStatus;
   customer?: BillCustomer;
+  /** Walk-in / typed-in customer name & phone (scalar; set even when no saved customer relation). */
+  customerName?: string;
+  customerPhone?: string;
   doctor?: string;
   prescription?: string;
   items: BillItem[];

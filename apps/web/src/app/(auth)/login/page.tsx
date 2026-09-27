@@ -3,8 +3,8 @@ import { LoginForm } from '@/modules/auth/components/login-form';
 import { ShieldCheck, Package, Receipt, ClipboardList, BarChart2 } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'Sign In | PharmaOS',
-  description: 'Sign in to your PharmaOS pharmacy management platform',
+  title: 'Sign In',
+  description: 'Sign in to your Pharma Ist pharmacy management platform',
 };
 
 const FEATURES = [
@@ -106,33 +106,29 @@ export default function LoginPage() {
         className="hidden lg:flex lg:w-[44%] xl:w-[45%] flex-col rounded-3xl overflow-hidden"
         style={{ background: 'linear-gradient(160deg, hsl(174 70% 9%) 0%, hsl(175 62% 13%) 100%)' }}
       >
-        {/* Logo */}
+        {/* Logo — wordmark with the mark (on its own black tile) between "Pharma" and "Ist" */}
         <div className="px-8 pt-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600">
-              <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-                <rect x="9" y="2" width="4" height="18" rx="2" fill="white" />
-                <rect x="2" y="9" width="18" height="4" rx="2" fill="white" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-[18px] font-bold text-white leading-none tracking-tight">PharmaOS</p>
-              <p className="mt-1 text-[9px] font-semibold text-white/40 uppercase tracking-[0.14em] leading-none">
-                Pharmacy Platform
-              </p>
-            </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[26px] font-extrabold tracking-tight text-white leading-none">Pharma</span>
+            <span className="flex h-14 w-14 items-center justify-center rounded-xl bg-black p-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-mark.png" alt="Pharma Ist" className="h-full w-full object-contain" />
+            </span>
+            <span className="text-[26px] font-extrabold tracking-tight text-white leading-none">Ist</span>
           </div>
+          <p className="mt-2 text-[9px] font-semibold text-white/40 uppercase tracking-[0.16em]">
+            Pharma First
+          </p>
         </div>
 
         {/* Headline */}
         <div className="px-8 mt-8">
           <h2 className="text-[31px] font-bold text-white leading-[1.2] tracking-tight">
-            Smarter pharmacy<br />
-            <span className="text-emerald-400">operations,</span><br />
-            every day.
+            Smarter pharmacy.<br />
+            <span className="text-emerald-400">First</span> with You.
           </h2>
           <p className="mt-4 text-[13.5px] text-white/50 leading-relaxed">
-            Everything you need to run your<br />pharmacy — in one place.
+            A next-gen pharmacy management<br />system by Z2INFY Technologies.
           </p>
         </div>
 
@@ -166,7 +162,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="px-8 pb-5 flex items-center justify-between text-[10.5px] text-white/25">
-          <span>© 2026 PharmaOS Technologies Pvt. Ltd.</span>
+          <span>© 2026 Z2INFY Technologies</span>
           <div className="flex items-center gap-2">
             <a href="/privacy" className="transition-colors duration-150 hover:text-white/50">Privacy</a>
             <span className="text-white/20">|</span>
@@ -190,14 +186,13 @@ export default function LoginPage() {
         </div>
 
         {/* Mobile-only logo */}
-        <div className="absolute top-5 left-5 lg:hidden flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-              <rect x="7" y="1.5" width="4" height="15" rx="2" fill="white" />
-              <rect x="1.5" y="7" width="15" height="4" rx="2" fill="white" />
-            </svg>
-          </div>
-          <p className="text-[16px] font-bold text-foreground leading-none">PharmaOS</p>
+        <div className="absolute top-5 left-5 lg:hidden flex items-center gap-1">
+          <span className="text-[18px] font-extrabold tracking-tight text-foreground leading-none">Pharma</span>
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-black p-0.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-mark.png" alt="Pharma Ist" className="h-full w-full object-contain" />
+          </span>
+          <span className="text-[18px] font-extrabold tracking-tight text-foreground leading-none">Ist</span>
         </div>
 
         {/* Auth card */}
@@ -216,7 +211,7 @@ export default function LoginPage() {
               Welcome back 👋
             </h1>
             <p className="mt-1.5 text-[13px] text-[hsl(220_9%_50%)]">
-              Sign in to your PharmaOS account
+              Sign in to your Pharma Ist account
             </p>
           </div>
 

@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth-store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -150,28 +151,22 @@ const TYPE_COLORS: Record<FieldType, string> = {
   toggle: 'bg-pink-50 text-pink-700 border-pink-200',
 };
 
-const STORAGE_KEY = 'pharmaos_form_config';
-
 // ─── Persistence helpers ──────────────────────────────────────────────────────
+// Config is stored per-tenant on the server ({ [formId]: FieldConfig[] }) and
+// carried on the auth user so every form in the app can read it live.
 
-function loadConfigs(): FormConfig[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_CONFIGS;
-    const saved = JSON.parse(raw) as Record<string, FieldConfig[]>;
-    return DEFAULT_CONFIGS.map((form) => ({
-      ...form,
-      fields: saved[form.id] ?? form.fields,
-    }));
-  } catch {
-    return DEFAULT_CONFIGS;
-  }
+function loadConfigs(saved?: Record<string, unknown>): FormConfig[] {
+  if (!saved || typeof saved !== 'object') return DEFAULT_CONFIGS;
+  return DEFAULT_CONFIGS.map((form) => ({
+    ...form,
+    fields: Array.isArray(saved[form.id]) ? (saved[form.id] as FieldConfig[]) : form.fields,
+  }));
 }
 
-function saveConfigs(configs: FormConfig[]) {
-  const toSave: Record<string, FieldConfig[]> = {};
-  configs.forEach((f) => { toSave[f.id] = f.fields; });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+function toStored(configs: FormConfig[]): Record<string, FieldConfig[]> {
+  const out: Record<string, FieldConfig[]> = {};
+  configs.forEach((f) => { out[f.id] = f.fields; });
+  return out;
 }
 
 // ─── Add-field blank ──────────────────────────────────────────────────────────
@@ -183,8 +178,15 @@ const BLANK_NEW_FIELD: Omit<FieldConfig, 'id' | 'order'> = {
 
 // ─── Main section ─────────────────────────────────────────────────────────────
 
-export function FormFieldsSection() {
-  const [configs, setConfigs] = useState<FormConfig[]>(() => loadConfigs());
+export function FormFieldsSection({
+  formFields,
+  onSave,
+}: {
+  formFields?: Record<string, unknown>;
+  onSave: (section: string, payload: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const patchUser = useAuthStore((s) => s.patchUser);
+  const [configs, setConfigs] = useState<FormConfig[]>(() => loadConfigs(formFields));
   const [selectedForm, setSelectedForm] = useState('billing');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -278,11 +280,18 @@ export function FormFieldsSection() {
 
   async function save() {
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
-    saveConfigs(configs);
-    setSaving(false);
-    setHasChanges(false);
-    toast.success('Form field configuration saved');
+    try {
+      const stored = toStored(configs);
+      await onSave('form-fields', { values: stored });
+      // Reflect immediately — every form reads its config off the auth user.
+      patchUser({ formFields: stored });
+      setHasChanges(false);
+      toast.success('Form field configuration saved');
+    } catch {
+      toast.error('Could not save form fields');
+    } finally {
+      setSaving(false);
+    }
   }
 
   const enabledCount = fields.filter((f) => f.enabled).length;

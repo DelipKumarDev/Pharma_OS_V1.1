@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { config } from './config';
+import { config, checkProductionConfig } from './config';
 import { connectDB, disconnectDB } from './config/database';
 import { logger } from './utils/logger';
 import { startAlertScheduler } from './jobs/alerts.job';
@@ -16,6 +16,15 @@ import path from 'path';
 
 async function startServer(): Promise<void> {
   try {
+    // Fail fast on unsafe production configuration (secrets, CORS, DB password).
+    const { errors, warnings } = checkProductionConfig(config);
+    warnings.forEach(w => logger.warn(`⚠️  config: ${w}`));
+    if (errors.length > 0) {
+      errors.forEach(e => logger.error(`❌ config: ${e}`));
+      logger.error('Refusing to start with unsafe production configuration. Fix the above and restart.');
+      process.exit(1);
+    }
+
     await connectDB();
 
     const server = app.listen(config.PORT, () => {

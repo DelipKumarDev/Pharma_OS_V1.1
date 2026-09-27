@@ -17,7 +17,7 @@ import { apiFetch } from '@/lib/api';
 const schema = z.object({
   name: z.string().min(2, 'Name is required'),
   email: z.string().email('Invalid email address'),
-  phone: z.string().optional(),
+  phone: z.string().optional().refine((v) => !v || /^\d{10}$/.test(v.replace(/\D/g, '')), 'Enter a valid 10-digit mobile number'),
   roleIds: z.array(z.string()).min(1, 'Select at least one role'),
   sendInvite: z.boolean().default(true),
 });

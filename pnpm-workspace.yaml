@@ -9,6 +9,7 @@ allowBuilds:
   msw: true
   prisma: true
   sharp: true
+  tesseract.js: true
   unrs-resolver: true
 minimumReleaseAgeExclude:
   - '@turbo/darwin-64@2.10.0'

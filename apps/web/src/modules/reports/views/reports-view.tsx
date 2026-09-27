@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Line,
@@ -17,11 +17,12 @@ import { toast } from 'sonner';
 import { formatCurrency, formatDate, formatNumber } from '@pharmaos/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { markDayClosed, postDayClose, fetchDayCloseHistory } from '@/lib/day-close';
+import { useAuthStore } from '@/store/auth-store';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,18 @@ const PERIODS = [
   { label: '30 Days', days: 30 },
   { label: '90 Days', days: 90 },
 ];
+
+// Each report is selected from the Reports sidebar submenu (?tab=). Only the
+// chosen report renders — no in-page tab bar duplicating that navigation.
+const REPORT_META: Record<string, { label: string; desc: string }> = {
+  sales: { label: 'Sales Overview', desc: 'Revenue trend, payment mix and peak hours' },
+  gst: { label: 'GST & Compliance', desc: 'GST slabs, GSTR-1 export and Schedule-H register' },
+  stock: { label: 'Stock Intelligence', desc: 'Category revenue, margins and dead-stock alerts' },
+  profit: { label: 'Profitability', desc: 'Gross profit, margins and top medicines' },
+  customers: { label: 'Customer Insights', desc: 'Acquisition, retention and top customers' },
+  'daily-close': { label: 'Daily Close', desc: 'End-of-day cash reconciliation' },
+};
+const REPORT_TABS = Object.keys(REPORT_META);
 
 const tooltipStyle = {
   contentStyle: {
@@ -772,6 +785,9 @@ const DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
 function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
   const [counts, setCounts] = useState<Record<number, string>>({});
   const [closed, setClosed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const tenant = useAuthStore((s) => s.user?.tenantName ?? 'default');
+  const { data: history = [], refetch: refetchHistory } = useQuery({ queryKey: ['day-close-history'], queryFn: fetchDayCloseHistory });
 
   const today = data?.dailySales[data.dailySales.length - 1];
   const systemCash = today?.cash ?? 0;
@@ -783,13 +799,30 @@ function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading:
   const physicalCash = DENOMINATIONS.reduce((sum, d) => sum + d * (Number(counts[d]) || 0), 0);
   const variance = physicalCash - systemCash;
 
-  function handleClose() {
+  async function handleClose() {
     if (physicalCash === 0) { toast.warning('Enter physical cash count before closing'); return; }
-    setClosed(true);
-    toast.success('Day closed successfully', {
-      description: `Cash variance: ${variance >= 0 ? '+' : ''}₹${variance.toFixed(2)}. Report saved.`,
-      duration: 8000,
-    });
+    setSaving(true);
+    try {
+      const denominations = Object.fromEntries(DENOMINATIONS.map((d) => [d, Number(counts[d]) || 0]));
+      await postDayClose({ physicalCash, denominations });
+      setClosed(true);
+      markDayClosed(tenant); // mirror for the synchronous browser-close guard
+      refetchHistory();
+      toast.success('Day closed successfully', {
+        description: `Cash variance: ${variance >= 0 ? '+' : ''}₹${variance.toFixed(2)}. Recorded to the server.`,
+        duration: 8000,
+      });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (/already been closed/i.test(msg)) {
+        setClosed(true); markDayClosed(tenant); refetchHistory();
+        toast.info('This day has already been closed');
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) return (
@@ -888,12 +921,14 @@ function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading:
             size="sm"
             className="gap-1.5 shrink-0"
             onClick={handleClose}
-            disabled={closed}
+            disabled={closed || saving}
             variant={closed ? 'outline' : 'default'}
           >
             {closed
               ? <><CheckCircle className="h-4 w-4 text-success" /> Day Closed</>
-              : <><Calculator className="h-4 w-4" /> Close Day</>
+              : saving
+                ? <><Skeleton className="h-4 w-4 rounded-full" /> Closing…</>
+                : <><Calculator className="h-4 w-4" /> Close Day</>
             }
           </Button>
         </div>
@@ -910,6 +945,39 @@ function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading:
           </div>
         </div>
       )}
+
+      {/* Audit trail — server-recorded day closes */}
+      {history.length > 0 && (
+        <div>
+          <SectionTitle description="Every closed day is recorded on the server and auditable across devices">Day Close History</SectionTitle>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-muted-foreground">
+                  {['Date', 'Bills', 'System Cash', 'Physical', 'Variance', 'Total', 'Closed By'].map((h) => (
+                    <th key={h} className="px-3 py-2 text-left font-semibold whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {history.map((h) => (
+                  <tr key={h.id} className="hover:bg-muted/20">
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">{formatDate(h.closeDate)}</td>
+                    <td className="px-3 py-2 tabular-nums">{h.billCount}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatCurrency(h.systemCash)}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatCurrency(h.physicalCash)}</td>
+                    <td className={cn('px-3 py-2 tabular-nums font-semibold', h.variance > 0 ? 'text-success' : h.variance < 0 ? 'text-destructive' : 'text-muted-foreground')}>
+                      {h.variance >= 0 ? '+' : ''}{formatCurrency(h.variance)}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{formatCurrency(h.systemTotal)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{h.closedByName ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -918,12 +986,22 @@ function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading:
 
 export function ReportsView() {
   const router = useRouter();
-  const [days, setDays] = useState(30);
-  const [activeTab, setActiveTab] = useState('sales');
+  const searchParams = useSearchParams();
+  // Default the analytics window to Today (Divya R187) — the owner can widen it.
+  const [days, setDays] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  // The report to show is chosen from the Reports sidebar submenu (?tab=).
+  // Derived from the URL so client-side submenu clicks switch it reactively.
+  const tabParam = searchParams.get('tab');
+  const activeTab = tabParam && REPORT_TABS.includes(tabParam) ? tabParam : 'sales';
+
+  // "Live" mode auto-refreshes the analytics every 30s (J5 — it was a dead label).
+  const [live, setLive] = useState(false);
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ['reports', days],
     queryFn: () => fetchReports(days),
+    refetchInterval: live ? 30000 : false,
+    refetchOnWindowFocus: live,
   });
 
   async function exportCSV() {
@@ -943,12 +1021,12 @@ export function ReportsView() {
     if (!win || !data) return;
     const s = data.summary;
     win.document.write(`
-      <html><head><title>PharmaOS Report</title>
+      <html><head><title>Pharma Ist Report</title>
       <style>body{font-family:sans-serif;padding:24px;color:#1e293b;}h1{color:#0d9488;}
       table{width:100%;border-collapse:collapse;margin-top:16px;}
       th,td{border:1px solid #e2e8f0;padding:8px;text-align:left;font-size:12px;}
       th{background:#f8fafc;font-weight:600;}</style></head><body>
-      <h1>PharmaOS Analytics Report</h1>
+      <h1>Pharma Ist Analytics Report</h1>
       <p>Period: Last ${days} days &nbsp;|&nbsp; Generated: ${new Date().toLocaleString()}</p>
       <h2>Summary</h2>
       <table><tr><th>Metric</th><th>Value</th></tr>
@@ -985,49 +1063,58 @@ export function ReportsView() {
         </div>
       </div>
 
-      {/* Period selector */}
-      <div className="flex items-center gap-1.5 rounded-xl border border-border bg-muted/30 p-1 w-fit">
-        {PERIODS.map((p) => (
-          <button
-            key={p.days}
-            onClick={() => setDays(p.days)}
-            className={cn(
-              'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
-              days === p.days
-                ? 'bg-white text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {p.label}
-          </button>
-        ))}
-        <span className="ml-1 flex items-center gap-1 text-xs text-muted-foreground pr-1">
-          <Clock className="h-3 w-3" /> Live
-        </span>
+      {/* Current report (chosen from the Reports sidebar submenu) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+            {activeTab === 'daily-close' ? <Calculator className="h-4 w-4 text-primary" /> : <TrendingUp className="h-4 w-4 text-primary" />}
+          </span>
+          <div>
+            <p className="text-sm font-bold leading-tight">{REPORT_META[activeTab]?.label}</p>
+            <p className="text-xs text-muted-foreground">{REPORT_META[activeTab]?.desc}</p>
+          </div>
+        </div>
+
+        {/* Period selector — not applicable to the Daily Close reconciliation */}
+        {activeTab !== 'daily-close' && (
+          <div className="flex items-center gap-1.5 rounded-xl border border-border bg-muted/30 p-1 w-fit">
+            {PERIODS.map((p) => (
+              <button
+                key={p.days}
+                onClick={() => setDays(p.days)}
+                className={cn(
+                  'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
+                  days === p.days ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setLive((v) => !v)}
+              title={live ? 'Live auto-refresh on (every 30s)' : 'Turn on live auto-refresh'}
+              className={cn(
+                'ml-1 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all',
+                live ? 'bg-success/15 text-success' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <span className={cn('h-2 w-2 rounded-full', live ? 'bg-success animate-pulse' : 'bg-muted-foreground/40')} />
+              {live ? (isFetching ? 'Refreshing…' : 'Live') : 'Live'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full justify-start overflow-x-auto">
-          <TabsTrigger value="sales">Sales Overview</TabsTrigger>
-          <TabsTrigger value="gst">GST & Compliance</TabsTrigger>
-          <TabsTrigger value="stock">Stock Intelligence</TabsTrigger>
-          <TabsTrigger value="profit">Profitability</TabsTrigger>
-          <TabsTrigger value="customers">Customers</TabsTrigger>
-          <TabsTrigger value="daily-close" className="gap-1.5">
-            <Calculator className="h-3.5 w-3.5" />Daily Close
-          </TabsTrigger>
-        </TabsList>
-
-        <div className="mt-5">
-          <TabsContent value="sales"><SalesTab data={data} loading={isLoading} /></TabsContent>
-          <TabsContent value="gst"><GSTTab data={data} loading={isLoading} /></TabsContent>
-          <TabsContent value="stock"><StockTab data={data} loading={isLoading} /></TabsContent>
-          <TabsContent value="profit"><ProfitTab data={data} loading={isLoading} /></TabsContent>
-          <TabsContent value="customers"><CustomersTab data={data} loading={isLoading} /></TabsContent>
-          <TabsContent value="daily-close"><CashReconciliationTab data={data} loading={isLoading} /></TabsContent>
-        </div>
-      </Tabs>
+      {/* Only the selected report renders */}
+      <div className="mt-1">
+        {activeTab === 'sales' && <SalesTab data={data} loading={isLoading} />}
+        {activeTab === 'gst' && <GSTTab data={data} loading={isLoading} />}
+        {activeTab === 'stock' && <StockTab data={data} loading={isLoading} />}
+        {activeTab === 'profit' && <ProfitTab data={data} loading={isLoading} />}
+        {activeTab === 'customers' && <CustomersTab data={data} loading={isLoading} />}
+        {activeTab === 'daily-close' && <CashReconciliationTab data={data} loading={isLoading} />}
+      </div>
     </div>
   );
 }

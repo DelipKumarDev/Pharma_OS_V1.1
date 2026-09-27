@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
@@ -65,7 +65,7 @@ const REASON_LABELS: Record<string, string> = {
 };
 
 const CONDITION_CONFIG = {
-  resaleable: { label: 'Resaleable', cls: 'text-success bg-success/10' },
+  resaleable: { label: 'Resalable', cls: 'text-success bg-success/10' },
   damaged: { label: 'Damaged', cls: 'text-destructive bg-destructive/10' },
   expired: { label: 'Expired', cls: 'text-warning-600 bg-warning/10' },
 };
@@ -125,14 +125,15 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
             <RotateCcw className="h-4 w-4 text-primary" />
             {ret.returnNumber}
           </SheetTitle>
-          <SheetDescription>
-            <div className="flex items-center gap-2">
-              <Badge variant={cfg.variant} dot className="text-xs">{cfg.label}</Badge>
-              <Badge variant={isCustomer ? 'secondary' : 'muted'} className="text-xs">
-                {isCustomer ? 'Customer Return' : 'Vendor Return'}
-              </Badge>
-            </div>
+          <SheetDescription className="sr-only">
+            {isCustomer ? 'Customer' : 'Vendor'} return {ret.returnNumber} — status {cfg.label}
           </SheetDescription>
+          <div className="flex items-center gap-2">
+            <Badge variant={cfg.variant} dot className="text-xs">{cfg.label}</Badge>
+            <Badge variant={isCustomer ? 'secondary' : 'muted'} className="text-xs">
+              {isCustomer ? 'Customer Return' : 'Vendor Return'}
+            </Badge>
+          </div>
         </SheetHeader>
 
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-2">
@@ -261,6 +262,11 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
 
 // ─── New return sheet ─────────────────────────────────────────────────────────
 
+interface ReturnLine {
+  medicineName: string; batchNumber: string; qty: string; unitPrice: string; condition: string;
+  medicineId?: string; maxQty?: number; expiryDate?: string;
+}
+
 function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [type, setType] = useState<ReturnType>('customer_return');
@@ -272,19 +278,73 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const [refundMethod, setRefundMethod] = useState('cash');
-  const [items, setItems] = useState([{ medicineName: '', batchNumber: '', qty: '', unitPrice: '', condition: 'resaleable' }]);
+  const emptyLine = (): ReturnLine => ({ medicineName: '', batchNumber: '', qty: '', unitPrice: '', condition: 'resaleable' });
+  const [items, setItems] = useState<ReturnLine[]>([emptyLine()]);
+  const [billId, setBillId] = useState<string | null>(null);
+  const [billLookup, setBillLookup] = useState<'idle' | 'loading' | 'found' | 'notfound'>('idle');
+  const lastFetched = useRef('');
 
-  function addItem() { setItems((p) => [...p, { medicineName: '', batchNumber: '', qty: '', unitPrice: '', condition: 'resaleable' }]); }
+  function addItem() { setItems((p) => [...p, emptyLine()]); }
   function removeItem(i: number) { setItems((p) => p.filter((_, idx) => idx !== i)); }
-  function updateItem(i: number, field: string, val: string) {
-    setItems((p) => p.map((item, idx) => idx === i ? { ...item, [field]: val } : item));
+  function updateItem(i: number, field: keyof ReturnLine, val: string) {
+    setItems((p) => p.map((item, idx) => {
+      if (idx !== i) return item;
+      // Can't return more than what was billed for a fetched line.
+      if (field === 'qty' && item.maxQty != null) {
+        const n = Math.min(Math.max(0, Number(val) || 0), item.maxQty);
+        return { ...item, qty: val === '' ? '' : String(n) };
+      }
+      return { ...item, [field]: val };
+    }));
   }
+
+  // ── Intelligence: type a bill number → auto-fetch the customer + sold items so
+  // the shopkeeper only edits what's actually being returned. ──────────────────
+  const fetchBill = useCallback(async (raw: string) => {
+    const q = raw.trim();
+    lastFetched.current = q;
+    if (q.length < 3) { setBillLookup('idle'); return; }
+    setBillLookup('loading');
+    try {
+      const r = await apiFetch(`/api/billing?search=${encodeURIComponent(q)}&limit=10`);
+      const j = await r.json() as { data?: { data?: Array<{ id: string; billNumber: string; customerName?: string; customerPhone?: string; items: Array<{ medicineId: string; medicineName: string; batchNumber: string; quantity: number; sellingPrice: number; expiryDate?: string }> }> } };
+      const bills = j.data?.data ?? [];
+      const bill = bills.find((b) => b.billNumber?.toLowerCase() === q.toLowerCase()) ?? (bills.length === 1 ? bills[0] : null);
+      if (!bill || !bill.items?.length) { setBillId(null); setBillLookup('notfound'); return; }
+      setBillId(bill.id);
+      if (bill.customerName) setCustomerName(bill.customerName);
+      if (bill.customerPhone) setCustomerPhone(bill.customerPhone);
+      setItems(bill.items.map((it) => ({
+        medicineName: it.medicineName ?? '',
+        batchNumber: it.batchNumber ?? '',
+        qty: String(it.quantity ?? ''),
+        unitPrice: String(it.sellingPrice ?? ''),
+        condition: 'resaleable',
+        medicineId: it.medicineId,
+        maxQty: it.quantity,
+        expiryDate: it.expiryDate,
+      })));
+      setBillLookup('found');
+    } catch { setBillLookup('notfound'); }
+  }, []);
+
+  // Debounced auto-fetch as the bill number is typed (customer returns only).
+  useEffect(() => {
+    if (type !== 'customer_return') return;
+    const q = billNumber.trim();
+    if (q === lastFetched.current) return;
+    if (q.length < 3) { setBillLookup('idle'); setBillId(null); return; }
+    const h = setTimeout(() => fetchBill(q), 450);
+    return () => clearTimeout(h);
+  }, [billNumber, type, fetchBill]);
 
   const mutation = useMutation({
     mutationFn: async () => {
       const returnItems = items.filter((i) => i.medicineName.trim()).map((i, idx) => ({
         id: `ri_${Date.now()}_${idx}`,
+        medicineId: i.medicineId,
         medicineName: i.medicineName, batchNumber: i.batchNumber,
+        expiryDate: i.expiryDate,
         returnQty: Number(i.qty) || 1,
         unitPrice: Number(i.unitPrice) || 0,
         totalAmount: (Number(i.qty) || 1) * (Number(i.unitPrice) || 0),
@@ -292,31 +352,48 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
       }));
       const totalAmount = returnItems.reduce((s, i) => s + i.totalAmount, 0);
       const payload = {
-        type, reason,
+        type, reason, refundMethod,
         reasonNotes: notes || undefined,
         items: returnItems,
         totalAmount, refundAmount: totalAmount,
         ...(type === 'customer_return'
-          ? { billNumber: billNumber || undefined, customerName, customerPhone: customerPhone || undefined, refundMethod }
+          ? { billId: billId || undefined, billNumber: billNumber || undefined, customerName, customerPhone: customerPhone || undefined }
           : { vendorName, purchaseInvoiceNumber: invoiceNumber || undefined }),
       };
       const r = await apiFetch('/api/returns', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      return r.json();
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!r.ok || !j.success) throw new Error(j.message ?? 'Failed to submit return');
+      return j;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['returns'] });
       qc.invalidateQueries({ queryKey: ['return-stats'] });
       toast.success('Return request submitted for approval');
+      // Reset the form so the next "New Return" starts clean.
+      setBillNumber(''); setCustomerName(''); setCustomerPhone(''); setVendorName('');
+      setInvoiceNumber(''); setReason(''); setNotes(''); setRefundMethod('cash');
+      setItems([emptyLine()]); setBillId(null); setBillLookup('idle'); lastFetched.current = '';
       onClose();
     },
-    onError: () => toast.error('Failed to submit return'),
+    onError: (e: Error) => toast.error(e.message),
   });
 
-  const canSubmit = reason && items.some((i) => i.medicineName.trim()) &&
-    (type === 'customer_return' ? customerName : vendorName);
+  // Every named line must have a positive quantity, and a customer return can't
+  // exceed the quantity actually billed (I2 — vendor returns were accepting any
+  // random/oversized data). Vendor returns still require a vendor + reason.
+  const namedItems = items.filter((i) => i.medicineName.trim());
+  const itemsValid = namedItems.length > 0 && namedItems.every((i) => {
+    const q = Number(i.qty) || 0;
+    return q > 0 && (i.maxQty === undefined || q <= i.maxQty);
+  });
+  // Customer name is optional on a customer return (walk-in returns are valid, and
+  // the bill number links the sale) — consistent with walk-in billing (I5). Vendor
+  // returns still require a vendor.
+  const canSubmit = !!reason && itemsValid &&
+    (type === 'customer_return' ? true : !!vendorName);
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -345,7 +422,20 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
           {type === 'customer_return' ? (
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Customer Details</p>
-              <Input placeholder="Original bill number (e.g. INV000003)" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} className="h-8 text-sm" />
+              <div className="space-y-1">
+                <div className="relative">
+                  <Input placeholder="Original bill number (e.g. INV000003) — auto-fills the rest" value={billNumber}
+                    onChange={(e) => setBillNumber(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); fetchBill(billNumber); } }}
+                    className="h-8 text-sm pr-8" />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2">
+                    {billLookup === 'loading' && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                    {billLookup === 'found' && <CheckCircle className="h-3.5 w-3.5 text-success" />}
+                  </span>
+                </div>
+                {billLookup === 'found' && <p className="text-2xs text-success">✓ Bill loaded — {items.length} item{items.length !== 1 ? 's' : ''} filled in. Adjust quantity/condition for what&apos;s being returned.</p>}
+                {billLookup === 'notfound' && billNumber.trim().length >= 3 && <p className="text-2xs text-muted-foreground">No matching bill found — you can still enter the details manually.</p>}
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <Input placeholder="Customer name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-8 text-sm" />
                 <Input placeholder="Phone number" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="h-8 text-sm" maxLength={10} />
@@ -383,11 +473,14 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
                   </div>
                   <div className="grid grid-cols-4 gap-1.5">
                     <Input value={item.batchNumber} onChange={(e) => updateItem(i, 'batchNumber', e.target.value)} className="h-7 text-xs" placeholder="Batch" />
-                    <Input type="number" value={item.qty} onChange={(e) => updateItem(i, 'qty', e.target.value)} className="h-7 text-xs" placeholder="Qty" />
+                    <div className="relative">
+                      <Input type="number" min={0} max={item.maxQty} value={item.qty} onChange={(e) => updateItem(i, 'qty', e.target.value)} className="h-7 text-xs pr-6" placeholder="Qty" />
+                      {item.maxQty != null && <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground">/{item.maxQty}</span>}
+                    </div>
                     <Input type="number" value={item.unitPrice} onChange={(e) => updateItem(i, 'unitPrice', e.target.value)} className="h-7 text-xs" placeholder="₹ Price" />
                     <select value={item.condition} onChange={(e) => updateItem(i, 'condition', e.target.value)}
                       className="h-7 text-xs rounded-md border border-border bg-background px-1.5 focus:outline-none focus:ring-1 focus:ring-primary">
-                      <option value="resaleable">Resaleable</option>
+                      <option value="resaleable">Resalable</option>
                       <option value="damaged">Damaged</option>
                       <option value="expired">Expired</option>
                     </select>
@@ -418,23 +511,26 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
               placeholder="Additional notes (optional)…" />
           </div>
 
-          {/* Refund method (customer only) */}
-          {type === 'customer_return' && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Refund Method</p>
-              <div className="grid grid-cols-4 gap-1.5">
-                {[['cash', 'Cash'], ['upi', 'UPI'], ['credit_note', 'Credit'], ['original_payment', 'Original']].map(([val, label]) => (
-                  <button key={val} onClick={() => setRefundMethod(val ?? '')}
-                    className={cn(
-                      'rounded-lg py-2 text-xs font-semibold border transition-all',
-                      refundMethod === val ? 'bg-primary text-white border-primary' : 'border-border bg-background text-muted-foreground hover:bg-muted'
-                    )}>
-                    {label}
-                  </button>
-                ))}
-              </div>
+          {/* Refund / settlement method — for both customer and vendor returns (TC_003) */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              {type === 'customer_return' ? 'Refund Method' : 'Settlement Method'}
+            </p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(type === 'customer_return'
+                ? [['cash', 'Cash'], ['upi', 'UPI'], ['credit_note', 'Credit'], ['original_payment', 'Original']]
+                : [['credit_note', 'Vendor Credit'], ['cash', 'Cash'], ['upi', 'Bank/UPI'], ['original_payment', 'Replacement']]
+              ).map(([val, label]) => (
+                <button key={val} type="button" onClick={() => setRefundMethod(val ?? '')}
+                  className={cn(
+                    'rounded-lg py-2 text-xs font-semibold border transition-all',
+                    refundMethod === val ? 'bg-primary text-white border-primary' : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                  )}>
+                  {label}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
         </div>
 
         <SheetFooter className="px-6 pb-6 pt-2">
@@ -452,13 +548,14 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
 
 export function ReturnsView() {
   const [typeFilter, setTypeFilter] = useState<ReturnType | 'all'>('all');
+  const [pendingOnly, setPendingOnly] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<ReturnRequest | null>(null);
   const [newReturnOpen, setNewReturnOpen] = useState(false);
 
   const { data: stats } = useQuery({ queryKey: ['return-stats'], queryFn: fetchStats });
   const { data: returns = [], isLoading } = useQuery({
-    queryKey: ['returns', typeFilter],
-    queryFn: () => fetchReturns(typeFilter === 'all' ? undefined : typeFilter),
+    queryKey: ['returns', typeFilter, pendingOnly],
+    queryFn: () => fetchReturns(typeFilter === 'all' ? undefined : typeFilter, pendingOnly ? 'pending' : undefined),
   });
 
   const columns: ColumnDef<ReturnRequest>[] = [
@@ -493,7 +590,11 @@ export function ReturnsView() {
     {
       id: 'items',
       header: 'Items',
-      cell: ({ row }) => <span className="text-sm text-muted-foreground">{row.original.items.length}</span>,
+      cell: ({ row }) => {
+        const n = row.original.items.length;
+        const qty = row.original.items.reduce((s, it) => s + (it.returnQty ?? 0), 0);
+        return <span className="text-sm text-muted-foreground">{n} item{n !== 1 ? 's' : ''} · {qty} qty</span>;
+      },
     },
     {
       accessorKey: 'reason',
@@ -570,26 +671,39 @@ export function ReturnsView() {
       {stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
-            { label: 'Total Returns', value: stats.totalReturns, icon: RotateCcw, color: 'text-primary', bg: 'bg-primary/10' },
-            { label: 'Pending Approval', value: stats.pendingApproval, icon: Clock, color: 'text-warning-600', bg: 'bg-warning/10', urgent: stats.pendingApproval > 0 },
-            { label: 'Processed Today', value: stats.processedToday, icon: CheckCircle, color: 'text-success', bg: 'bg-success/10' },
-            { label: 'Refunded (Month)', value: formatCurrency(stats.totalRefundedThisMonth), icon: ArrowLeftRight, color: 'text-blue-600', bg: 'bg-blue-500/10' },
-            { label: 'Customer Returns', value: stats.customerReturns, icon: User, color: 'text-purple-600', bg: 'bg-purple-500/10' },
-            { label: 'Vendor Returns', value: stats.vendorReturns, icon: Building2, color: 'text-muted-foreground', bg: 'bg-muted' },
-          ].map(({ label, value, icon: Icon, color, bg, urgent }) => (
-            <div key={label} className={cn(
-              'flex items-center gap-3 rounded-xl border border-border bg-card p-4',
-              urgent && 'border-warning/50 bg-warning/5'
-            )}>
-              <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', bg)}>
-                <Icon className={cn('h-4 w-4', color)} />
-              </div>
-              <div>
-                <p className="text-lg font-bold leading-tight">{value}</p>
-                <p className="text-xs text-muted-foreground">{label}</p>
-              </div>
-            </div>
-          ))}
+            { label: 'Total Returns', value: stats.totalReturns, icon: RotateCcw, color: 'text-primary', bg: 'bg-primary/10', filter: 'all' as const },
+            { label: 'Pending Approval', value: stats.pendingApproval, icon: Clock, color: 'text-warning-600', bg: 'bg-warning/10', urgent: stats.pendingApproval > 0, filter: 'pending' as const },
+            { label: 'Processed Today', value: stats.processedToday, icon: CheckCircle, color: 'text-success', bg: 'bg-success/10', filter: null },
+            { label: 'Refunded (Month)', value: formatCurrency(stats.totalRefundedThisMonth), icon: ArrowLeftRight, color: 'text-blue-600', bg: 'bg-blue-500/10', filter: null },
+            { label: 'Customer Returns', value: stats.customerReturns, icon: User, color: 'text-purple-600', bg: 'bg-purple-500/10', filter: null },
+            { label: 'Vendor Returns', value: stats.vendorReturns, icon: Building2, color: 'text-muted-foreground', bg: 'bg-muted', filter: null },
+          ].map(({ label, value, icon: Icon, color, bg, urgent, filter }) => {
+            // A card is "selected" only when it matches the live view state, so the
+            // header highlight always agrees with the table below (not a stuck tint).
+            const selected = filter === 'pending' ? pendingOnly : filter === 'all' ? !pendingOnly : false;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => { if (filter === 'pending') { setPendingOnly(true); setTypeFilter('all'); } else if (filter === 'all') setPendingOnly(false); }}
+                disabled={filter === null}
+                className={cn(
+                  'flex items-center gap-3 rounded-xl border bg-card p-4 text-left transition-all',
+                  selected ? 'border-primary ring-2 ring-primary/25' : 'border-border',
+                  !selected && urgent && 'border-warning/40',
+                  filter && !selected && 'hover:bg-muted/50 cursor-pointer',
+                )}
+              >
+                <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', bg)}>
+                  <Icon className={cn('h-4 w-4', color)} />
+                </div>
+                <div>
+                  <p className="text-lg font-bold leading-tight">{value}</p>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -601,9 +715,16 @@ export function ReturnsView() {
             <p className="text-sm font-semibold text-warning-600">{stats.pendingApproval} return{stats.pendingApproval !== 1 ? 's' : ''} pending approval</p>
             <p className="text-xs text-muted-foreground">Review and approve to update inventory and process refunds</p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setTypeFilter('all')}>
+          <Button size="sm" variant="outline" onClick={() => { setPendingOnly(true); setTypeFilter('all'); }}>
             Review Now
           </Button>
+        </div>
+      )}
+
+      {pendingOnly && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>Showing <strong className="text-foreground">pending returns</strong> only</span>
+          <button onClick={() => setPendingOnly(false)} className="text-primary hover:underline">Show all statuses</button>
         </div>
       )}
 
@@ -637,7 +758,7 @@ export function ReturnsView() {
         columns={columns}
         data={returns}
         loading={isLoading}
-        searchColumn="returnNumber"
+        globalSearch
         searchPlaceholder="Search by return number, customer, or vendor…"
         emptyMessage="No returns found"
         emptyDescription="Create a new return request to get started."

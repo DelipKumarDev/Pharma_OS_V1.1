@@ -23,7 +23,9 @@ export async function getReturnStats(tenantId: string) {
   const [processedToday, monthlyRefund] = await Promise.all([
     prisma.returnRequest.count({ where: { tenantId, status: 'processed', processedAt: { gte: today }, deletedAt: null } }),
     prisma.returnRequest.aggregate({
-      where: { tenantId, status: 'processed', deletedAt: null, createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) } },
+      // Count refunds once a return is approved (and still while processed) so the
+      // month total reflects approvals immediately (TC_016).
+      where: { tenantId, status: { in: ['approved', 'processed'] }, deletedAt: null, createdAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) } },
       _sum: { refundAmount: true },
     }),
   ]);
@@ -75,6 +77,25 @@ export async function createReturn(tenantId: string, input: Record<string, unkno
   if (!input['type']) throw new AppError('Return type is required', 422);
   const items = (input['items'] as Array<Record<string, unknown>>) ?? [];
   if (items.length === 0) throw new AppError('At least one item is required', 422);
+  // Validate required per-item fields → clean 422 rather than a leaked Prisma error.
+  for (const it of items) {
+    if (!(it['medicineName'] as string | undefined)?.trim()) throw new AppError('Each return item needs a medicine name', 422);
+    if (!(it['batchNumber'] as string | undefined)?.trim()) throw new AppError(`Batch number is required for ${it['medicineName']}`, 422);
+    const q = Number(it['returnQty']);
+    if (!Number.isFinite(q) || q < 1) throw new AppError(`Return quantity must be at least 1 for ${it['medicineName']}`, 422);
+  }
+
+  // Block returning the same bill's batch twice — an existing non-rejected return
+  // for this bill that already covers a medicine+batch can't be re-submitted (I3).
+  if (input['type'] === 'customer_return' && input['billNumber']) {
+    const prior = await prisma.returnRequest.findMany({
+      where: { tenantId, deletedAt: null, billNumber: input['billNumber'] as string, status: { not: 'rejected' } },
+      include: { items: true },
+    });
+    const seen = new Set(prior.flatMap((p) => p.items.map((it) => `${it.medicineName}|${it.batchNumber}`.toLowerCase())));
+    const dup = items.find((it) => seen.has(`${it['medicineName']}|${it['batchNumber']}`.toLowerCase()));
+    if (dup) throw new AppError(`${dup['medicineName']} (batch ${dup['batchNumber']}) from bill ${input['billNumber']} has already been returned`, 409);
+  }
 
   const returnNumber = await getNextReturnNumber(tenantId);
   const totalAmount = items.reduce((sum, i) => sum + ((i['totalAmount'] as number) ?? 0), 0);

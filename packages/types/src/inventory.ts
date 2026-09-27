@@ -72,6 +72,8 @@ export interface InventoryStats {
   lowStockCount: number;
   expiringSoonCount: number;
   outOfStockCount: number;
+  /** Medicines with stock comfortably above their reorder level. */
+  goodStockCount?: number;
   pendingTransfers: number;
 }
 

@@ -21,6 +21,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { useRefillMessage, openWhatsApp } from '@/lib/reminder';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -62,7 +63,13 @@ const customerSchema = z.object({
   phone: z.string().min(10, 'Valid phone required'),
   email: z.string().email().optional().or(z.literal('')),
   address: z.string().optional(),
-  dateOfBirth: z.string().optional(),
+  dateOfBirth: z.string().optional().refine((v) => {
+    // No future dates; a plausible human age (≤120 years) — Vinay P9.6.
+    if (!v) return true;
+    const d = new Date(v); const now = new Date();
+    if (isNaN(d.getTime()) || d > now) return false;
+    return (now.getTime() - d.getTime()) / (365.25 * 86400000) <= 120;
+  }, 'Enter a valid date of birth'),
   gender: z.enum(['male', 'female', 'other']).optional(),
   doctorName: z.string().optional(),
   customerType: z.enum(['walk_in', 'regular', 'vip', 'credit']).optional(),
@@ -124,7 +131,8 @@ function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             </div>
             <div className="space-y-1">
               <Label>Date of Birth</Label>
-              <Input {...register('dateOfBirth')} type="date" />
+              <Input {...register('dateOfBirth')} type="date" max={new Date().toISOString().substring(0, 10)} />
+              {errors.dateOfBirth && <p className="text-2xs text-destructive">{errors.dateOfBirth.message}</p>}
             </div>
             <div className="space-y-1">
               <Label>Gender</Label>
@@ -290,11 +298,13 @@ export function CustomersView() {
 
   const { data: stats } = useQuery({ queryKey: ['customer-stats'], queryFn: fetchCustomerStats });
   const { data: customers = [], isLoading } = useQuery({ queryKey: ['customers', debouncedSearch, typeFilter], queryFn: () => fetchCustomers(debouncedSearch, typeFilter) });
+  const refillMsg = useRefillMessage(); // TC_013: uses the tenant's configured template
 
   function exportCSV() {
     const headers = ['Name', 'Phone', 'Email', 'Type', 'Visits', 'Total Spend', 'Loyalty Points', 'Credit Balance', 'Last Visit'];
-    const rows = customers.map(c => [c.name, c.phone, c.email ?? '', c.customerType, c.totalVisits, c.totalSpend, c.loyaltyPoints, c.creditBalance, c.lastVisitDate ? formatDate(c.lastVisitDate) : ''].join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
+    const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = customers.map(c => [c.name, c.phone, c.email ?? '', c.customerType, c.totalVisits, c.totalSpend, c.loyaltyPoints, c.creditBalance, c.lastVisitDate ? formatDate(c.lastVisitDate) : ''].map(q).join(','));
+    const csv = [headers.map(q).join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -397,11 +407,8 @@ export function CustomersView() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => {
               const c = row.original;
-              if (!c.phone) { toast.error('No phone number on file for this customer'); return; }
-              const digits = c.phone.replace(/\D/g, '');
-              const full = digits.length === 10 ? `91${digits}` : digits;
-              const msg = encodeURIComponent(`Dear ${c.name.split(' ')[0]},\n\nThis is a reminder from *Pharmacy* for your medicine refill. Please visit us or call to refill your prescription.\n\nThank you! 🙏`);
-              window.open(`https://wa.me/${full}?text=${msg}`, '_blank');
+              const sent = openWhatsApp(c.phone, refillMsg({ customerName: c.name }));
+              if (!sent) toast.error('No valid phone number on file for this customer');
             }}>
               <Phone className="h-4 w-4" /> Send Reminder
             </DropdownMenuItem>
@@ -476,8 +483,6 @@ export function CustomersView() {
         columns={columns}
         data={customers}
         loading={isLoading}
-        searchColumn="customer"
-        searchPlaceholder="Filter customers…"
         emptyMessage="No customers found"
         emptyDescription="Add your first customer to start building profiles."
       />

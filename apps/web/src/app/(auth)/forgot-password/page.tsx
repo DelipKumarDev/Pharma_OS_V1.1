@@ -17,17 +17,6 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 
 /* ── Pharmacy cross + saffron-leaf icon ── */
-function PharmaLogoIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-      <rect x="15.5" y="5" width="9" height="30" rx="3.5" fill="white" opacity="0.95" />
-      <rect x="5" y="15.5" width="30" height="9" rx="3.5" fill="white" opacity="0.95" />
-      <path d="M24.5 5 C32 8 34 20 27 22 C25 16 23 9 24.5 5Z" fill="#f59e0b" opacity="0.9" />
-      <circle cx="20" cy="20" r="3" fill="white" opacity="0.55" />
-    </svg>
-  );
-}
-
 /* ── Step indicator ── */
 type Step = 'request' | 'verify' | 'reset' | 'success';
 const STEPS: { key: Step; label: string }[] = [
@@ -538,7 +527,7 @@ function SuccessStep() {
       </div>
       <div className="flex w-full flex-col gap-2 pt-2">
         <Button className="w-full" size="lg" onClick={() => router.push('/login')}>
-          Sign in to PharmaOS
+          Sign in to Pharma Ist
         </Button>
       </div>
     </div>
@@ -570,20 +559,17 @@ export default function ForgotPasswordPage() {
       {/* Card */}
       <div className="w-full max-w-md rounded-3xl bg-background p-8 shadow-2xl">
 
-        {/* PharmaOS logo row */}
+        {/* Pharma Ist logo row */}
         <div className="mb-6 flex items-center gap-3">
-          <div
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-            style={{
-              background:
-                'linear-gradient(135deg, hsl(162 65% 42%) 0%, hsl(175 77% 26%) 100%)',
-              boxShadow: '0 4px 16px hsl(162 65% 42% / 0.4)',
-            }}
-          >
-            <PharmaLogoIcon className="h-5 w-5" />
+          <div className="flex items-center gap-1">
+            <span className="text-[17px] font-extrabold tracking-tight text-foreground leading-none">Pharma</span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-black p-0.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-mark.png" alt="Pharma Ist" className="h-full w-full object-contain" />
+            </span>
+            <span className="text-[17px] font-extrabold tracking-tight text-foreground leading-none">Ist</span>
           </div>
-          <div>
-            <p className="text-sm font-bold">PharmaOS</p>
+          <div className="border-l border-border pl-3">
             <p className="text-[10px] text-muted-foreground">Account Recovery</p>
           </div>
           <div className="ml-auto">

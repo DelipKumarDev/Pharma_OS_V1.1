@@ -14,10 +14,15 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import type { Role } from '@pharmaos/types';
 
 async function fetchUsers(): Promise<User[]> {
   const res = await apiFetch('/api/users');
@@ -26,10 +31,22 @@ async function fetchUsers(): Promise<User[]> {
   return json.data?.data ?? ([] as User[]);
 }
 
+async function fetchRoles(): Promise<Role[]> {
+  const res = await apiFetch('/api/roles');
+  const json = await res.json() as { success: boolean; data: { data: Role[] } };
+  if (!res.ok) return [];
+  return json.data?.data ?? [];
+}
+
+interface EditForm { name: string; phone: string; status: string; roleIds: string[] }
+
 function exportCSV(data: User[]) {
   const headers = ['Name', 'Email', 'Phone', 'Roles', 'Status', 'MFA', 'Last Login', 'Created'];
-  const rows = data.map((u) => [u.name, u.email, u.phone ?? '', u.roles.map((r) => r.name).join('; '), u.status, u.mfaEnabled ? 'Yes' : 'No', u.lastLoginAt ? formatDateTime(u.lastLoginAt) : 'Never', formatDateTime(u.createdAt)].join(','));
-  const csv = [headers.join(','), ...rows].join('\n');
+  // Quote every field — names and formatted date/times contain commas, which
+  // otherwise split into extra unlabeled columns (Divya R23 / Vinay P2.4).
+  const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = data.map((u) => [u.name, u.email, u.phone ?? '', u.roles.map((r) => r.name).join('; '), u.status, u.mfaEnabled ? 'Yes' : 'No', u.lastLoginAt ? formatDateTime(u.lastLoginAt) : 'Never', formatDateTime(u.createdAt)].map(q).join(','));
+  const csv = [headers.map(q).join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -45,8 +62,57 @@ export function UsersView() {
   const qc = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [lockTarget, setLockTarget] = useState<User | null>(null);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState<EditForm>({ name: '', phone: '', status: 'active', roleIds: [] });
 
   const { data = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
+  const { data: allRoles = [] } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
+
+  function openEdit(u: User) {
+    setEditForm({ name: u.name, phone: u.phone ?? '', status: u.status, roleIds: u.roles.map((r) => r.id) });
+    setEditTarget(u);
+  }
+
+  const editMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch(`/api/users/${editTarget!.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editForm.name.trim(), phone: editForm.phone.trim() || null, status: editForm.status, roleIds: editForm.roleIds }),
+      });
+      const j = await res.json() as { success: boolean; message?: string };
+      if (!res.ok || !j.success) throw new Error(j.message ?? 'Failed to update user');
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User updated'); setEditTarget(null); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Admin reset password → reveal the one-time temp password to hand over.
+  const [tempPw, setTempPw] = useState<{ user: User; password: string } | null>(null);
+  const resetMutation = useMutation({
+    mutationFn: async (u: User) => {
+      const res = await apiFetch(`/api/users/${u.id}/reset-password`, { method: 'POST' });
+      const j = await res.json() as { success: boolean; message?: string; data?: { tempPassword: string } };
+      if (!res.ok || !j.success || !j.data) throw new Error(j.message ?? 'Failed to reset password');
+      return { u, password: j.data.tempPassword };
+    },
+    onSuccess: ({ u, password }) => setTempPw({ user: u, password }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const mfaMutation = useMutation({
+    mutationFn: async (u: User) => {
+      const res = await apiFetch(`/api/users/${u.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaEnabled: !u.mfaEnabled }),
+      });
+      const j = await res.json() as { success: boolean; message?: string };
+      if (!res.ok || !j.success) throw new Error(j.message ?? 'Failed to update MFA');
+      return !u.mfaEnabled;
+    },
+    onSuccess: (enabled) => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success(`MFA ${enabled ? 'enabled' : 'disabled'}`); },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const stats = {
     total: data.length,
@@ -138,11 +204,11 @@ export function UsersView() {
             <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem><Edit className="h-4 w-4" /> Edit User</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.success(`Password reset email sent to ${row.original.email}`)}>
+            <DropdownMenuItem onClick={() => openEdit(row.original)}><Edit className="h-4 w-4" /> Edit User</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => resetMutation.mutate(row.original)}>
               Reset Password
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.success(`MFA ${row.original.mfaEnabled ? 'disabled' : 'enabled'} for ${row.original.name}`)}>
+            <DropdownMenuItem onClick={() => mfaMutation.mutate(row.original)}>
               {row.original.mfaEnabled ? 'Disable MFA' : 'Enable MFA'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -207,6 +273,71 @@ export function UsersView() {
       />
 
       <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+
+      {/* Temporary password reveal (shown once) */}
+      <Dialog open={!!tempPw} onOpenChange={(o) => !o && setTempPw(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Temporary password</DialogTitle>
+            <DialogDescription>
+              Share this with <span className="font-medium text-foreground">{tempPw?.user.name}</span> securely. It won&apos;t be shown again — they should change it after signing in.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+            <code className="flex-1 font-mono text-sm tracking-wide select-all">{tempPw?.password}</code>
+            <Button size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(tempPw?.password ?? ''); toast.success('Copied'); }}>Copy</Button>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setTempPw(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User */}
+      <Dialog open={!!editTarget} onOpenChange={(o) => !o && setEditTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>Update {editTarget?.name}&apos;s profile, status and roles.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1"><Label>Name</Label><Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} /></div>
+              <div className="space-y-1"><Label>Phone</Label><Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="10-digit" /></div>
+            </div>
+            <div className="space-y-1">
+              <Label>Status</Label>
+              <Select value={editForm.status} onValueChange={(v) => setEditForm((f) => ({ ...f, status: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="locked">Locked</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Roles</Label>
+              <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-border p-2 max-h-40 overflow-y-auto">
+                {allRoles.map((r) => {
+                  const on = editForm.roleIds.includes(r.id);
+                  return (
+                    <label key={r.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm cursor-pointer hover:bg-muted">
+                      <input type="checkbox" checked={on} className="h-3.5 w-3.5 accent-primary"
+                        onChange={() => setEditForm((f) => ({ ...f, roleIds: on ? f.roleIds.filter((id) => id !== r.id) : [...f.roleIds, r.id] }))} />
+                      <span className="truncate">{r.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button>
+            <Button disabled={!editForm.name.trim() || editMutation.isPending} onClick={() => editMutation.mutate()}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!lockTarget} onOpenChange={(o) => !o && setLockTarget(null)}>
         <AlertDialogContent>

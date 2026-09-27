@@ -1,0 +1,48 @@
+name: Release
+
+# Tag a release (e.g. v1.2.0) to build, deploy to staging, smoke-test, then
+# deploy to production behind a manual approval gate.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or SHA to deploy
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production images (reproducibility check)
+        run: docker compose build
+      # Push to your registry here, tagged with ${{ github.ref_name }} and the SHA:
+      #   docker tag pharmaos-api:latest $REGISTRY/pharmaos-api:${{ github.ref_name }}
+      #   docker push $REGISTRY/pharmaos-api:${{ github.ref_name }}
+
+  staging:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging          # GitHub Environment (add secrets + reviewers)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging
+        run: echo "Deploy ${{ github.ref_name }} to staging (ssh/compose pull + up -d on the staging host)"
+      - name: Smoke test staging
+        run: |
+          echo "curl -fsk https://staging.pharmacy.example.com/health"
+          echo "curl -fsk https://staging.pharmacy.example.com/health/ready"
+          # Fail the job if either probe is not 200.
+
+  production:
+    needs: staging
+    runs-on: ubuntu-latest
+    environment: production       # protect with required reviewers = the approval gate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to production
+        run: echo "Deploy ${{ github.ref_name }} to production (compose pull + up -d; migrations run on api start)"
+      - name: Verify production readiness
+        run: echo "curl -fsk https://pharmacy.example.com/health/ready  # expect {ready, db:up}"

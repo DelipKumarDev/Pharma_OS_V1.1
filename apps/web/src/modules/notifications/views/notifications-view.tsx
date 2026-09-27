@@ -64,14 +64,14 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function NotificationCard({ notif, onRead }: { notif: Notification; onRead: (id: string) => void }) {
+function NotificationCard({ notif, onRead, highlight }: { notif: Notification; onRead: (id: string) => void; highlight?: boolean }) {
   const cat = CATEGORY_CONFIG[notif.category] ?? CATEGORY_CONFIG.system;
   const pri = PRIORITY_CONFIG[notif.priority] ?? PRIORITY_CONFIG.info;
   const CatIcon = cat.icon;
   const PriIcon = pri.icon;
 
   return (
-    <div className={cn('group relative rounded-xl border bg-card p-4 transition-all hover:shadow-sm', !notif.isRead && 'border-l-2 border-l-primary bg-primary/5')}>
+    <div data-notif-id={notif.id} className={cn('group relative rounded-xl border bg-card p-4 transition-all hover:shadow-sm', !notif.isRead && 'border-l-2 border-l-primary bg-primary/5', highlight && 'ring-2 ring-primary ring-offset-2')}>
       {!notif.isRead && (
         <div className={cn('absolute right-4 top-4 h-2 w-2 rounded-full', pri.dot)} />
       )}
@@ -118,6 +118,8 @@ function NotificationCard({ notif, onRead }: { notif: Notification; onRead: (id:
 export function NotificationsView() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const openedRef = React.useRef(false);
   const qc = useQueryClient();
 
   const { data: stats } = useQuery({ queryKey: ['notification-stats'], queryFn: fetchNotificationStats });
@@ -125,6 +127,16 @@ export function NotificationsView() {
     queryKey: ['notifications', activeCategory, unreadOnly],
     queryFn: () => fetchNotifications(activeCategory, unreadOnly),
   });
+
+  // Summary counts are derived from the loaded list so the header always
+  // matches the notifications shown below (TC_034).
+  const summary = {
+    total: notifications.length,
+    unread: notifications.filter(n => !n.isRead).length,
+    critical: notifications.filter(n => n.priority === 'critical').length,
+    warning: notifications.filter(n => n.priority === 'warning').length,
+    today: notifications.filter(n => new Date(n.createdAt).toDateString() === new Date().toDateString()).length,
+  };
 
   const markReadMutation = useMutation({
     mutationFn: markRead,
@@ -142,6 +154,25 @@ export function NotificationsView() {
       toast.success('All notifications marked as read');
     },
   });
+
+  // TC_021 — when arriving via /notifications?id=<id> (e.g. clicking a single
+  // notification in the header), scroll to it, highlight it, and mark it read.
+  React.useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (id) setHighlightId(id);
+  }, []);
+
+  React.useEffect(() => {
+    if (!highlightId || openedRef.current || notifications.length === 0) return;
+    const target = notifications.find(n => n.id === highlightId);
+    if (!target) return;
+    openedRef.current = true;
+    const el = document.querySelector(`[data-notif-id="${highlightId}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!target.isRead) markReadMutation.mutate(highlightId);
+    const t = setTimeout(() => setHighlightId(null), 3000);
+    return () => clearTimeout(t);
+  }, [highlightId, notifications, markReadMutation]);
 
   const categories = [
     { key: 'all', label: 'All' },
@@ -187,13 +218,13 @@ export function NotificationsView() {
       </div>
 
       {/* Summary cards */}
-      {(stats?.totalUnread ?? 0) > 0 && (
+      {notifications.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { label: 'Total Unread', value: stats?.totalUnread ?? 0, icon: Bell, color: 'text-primary', bg: 'bg-primary/10' },
-            { label: 'Critical', value: stats?.criticalUnread ?? 0, icon: Zap, color: 'text-destructive', bg: 'bg-destructive/10' },
-            { label: 'Warnings', value: stats?.warningUnread ?? 0, icon: AlertTriangle, color: 'text-warning-700', bg: 'bg-warning/10' },
-            { label: "Today's Total", value: stats?.todayTotal ?? 0, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950' },
+            { label: 'Total Unread', value: summary.unread, icon: Bell, color: 'text-primary', bg: 'bg-primary/10' },
+            { label: 'Critical', value: summary.critical, icon: Zap, color: 'text-destructive', bg: 'bg-destructive/10' },
+            { label: 'Warnings', value: summary.warning, icon: AlertTriangle, color: 'text-warning-700', bg: 'bg-warning/10' },
+            { label: "Today's Total", value: summary.today, icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950' },
           ].map(({ label, value, icon: Icon, color, bg }) => (
             <div key={label} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
               <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', bg)}>
@@ -246,7 +277,7 @@ export function NotificationsView() {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{unread} unread</p>
           )}
           {notifications.map(notif => (
-            <NotificationCard key={notif.id} notif={notif} onRead={id => markReadMutation.mutate(id)} />
+            <NotificationCard key={notif.id} notif={notif} onRead={id => markReadMutation.mutate(id)} highlight={highlightId === notif.id} />
           ))}
         </div>
       )}

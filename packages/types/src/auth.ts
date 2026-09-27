@@ -27,10 +27,24 @@ export interface AuthUser {
   tenantId: ID;
   tenantName: string;
   tenantSlug: string;
+  /** Pharmacy logo (data URL / URL) shown in the app header, dashboard and receipts. */
+  logoUrl?: string;
+  /** Tenant localization (System Preferences) — currency code + numeric date format. */
+  currency?: string;
+  dateFormat?: string;
   supportContact?: string;
+  /** Per-tenant configurable dropdown option lists, keyed by registry key (TC_028). */
+  dropdownOptions?: Record<string, string[]>;
+  /** Per-tenant configurable message templates (refill reminder, alerts…). */
+  messageTemplates?: Record<string, string>;
+  /** Menu keys (sidebar leaf hrefs) hidden for this user's role(s). */
+  menuHidden?: string[];
+  /** Per-tenant form-field configuration ({ [formId]: FieldConfig[] }). */
+  formFields?: Record<string, unknown>;
   roles: string[];
   permissions: string[];
   mfaEnabled: boolean;
+  mustChangePassword?: boolean;
   lastLoginAt?: Timestamp;
   passwordChangedAt?: Timestamp;
 }

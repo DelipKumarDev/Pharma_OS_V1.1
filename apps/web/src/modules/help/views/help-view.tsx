@@ -24,7 +24,7 @@ const FAQ_ITEMS = [
   { category: 'Reports', q: 'How do I export a report?', a: 'Each module table has an "Export CSV" button that downloads the current view as a spreadsheet. You need "export" permission on the reports module.' },
   { category: 'Users', q: 'How do I invite a new staff member?', a: 'Go to Users → click "Invite User". Enter their name, email, phone, and assign one or more roles. They will receive an email invite to set their password and log in.' },
   { category: 'Users', q: 'What is the difference between roles?', a: 'Pharma Admin has full access. Pharmacist can dispense and bill. Inventory Manager handles stock. Billing Assistant can only create bills. Reports Viewer has read-only reports access. You can create custom roles in Roles & Permissions.' },
-  { category: 'System', q: 'Does PharmaOS work offline?', a: 'Yes — with offline mode enabled (Settings → Security → Enable Offline Mode), you can continue billing and stock entry without internet. Changes sync automatically when you reconnect.' },
+  { category: 'System', q: 'Does Pharma Ist work offline?', a: 'Yes — with offline mode enabled (Settings → Security → Enable Offline Mode), you can continue billing and stock entry without internet. Changes sync automatically when you reconnect.' },
   { category: 'System', q: 'How is my data backed up?', a: 'With Auto Backup enabled (Settings → General), data is encrypted and backed up to secure cloud storage every 24 hours. You can also trigger a manual backup anytime from Settings.' },
 ];
 
@@ -63,7 +63,7 @@ export function HelpView() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Help & Support</h1>
-        <p className="text-sm text-muted-foreground">Guides, FAQs, and keyboard shortcuts to get the most out of PharmaOS</p>
+        <p className="text-sm text-muted-foreground">Guides, FAQs, and keyboard shortcuts to get the most out of Pharma Ist</p>
       </div>
 
       {/* Quick actions */}
@@ -181,7 +181,7 @@ export function HelpView() {
           <CheckCircle2 className="h-5 w-5 text-success" />
           <div>
             <p className="font-semibold text-success-700">All Systems Operational</p>
-            <p className="text-sm text-muted-foreground">PharmaOS API, database, and sync services are all running normally. Last checked: {new Date().toLocaleTimeString()}</p>
+            <p className="text-sm text-muted-foreground">Pharma Ist API, database, and sync services are all running normally. Last checked: {new Date().toLocaleTimeString()}</p>
           </div>
           <Button size="sm" variant="outline" className="ml-auto" onClick={() => toast.info('Checking system status…')}>
             View Status Page

@@ -5,6 +5,14 @@ import bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
+  // Safety guard: this seed creates demo data with known credentials. It must
+  // never run against a production database unless explicitly overridden.
+  if (process.env['NODE_ENV'] === 'production' && process.env['ALLOW_PROD_SEED'] !== 'true') {
+    console.error('❌ Refusing to seed: NODE_ENV=production. This seed creates DEMO data with known credentials.');
+    console.error('   If you really intend to seed production, set ALLOW_PROD_SEED=true. (You almost never want this.)');
+    process.exit(1);
+  }
+
   console.log('🌱 Seeding database...');
 
   // ─── Tenant ───────────────────────────────────────────────────────────────

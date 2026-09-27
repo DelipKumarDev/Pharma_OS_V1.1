@@ -31,7 +31,7 @@ export function HelpChatbot() {
 
   useEffect(() => {
     if (open && msgs.length === 0) {
-      push({ from: 'bot', text: 'Hi! I can help you use PharmaOS. Ask me how to do something, or pick a topic below.' });
+      push({ from: 'bot', text: 'Hi! I can help you use Pharma Ist. Ask me how to do something, or pick a topic below.' });
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -61,7 +61,7 @@ export function HelpChatbot() {
     // treat it as an email and open a pre-filled mailto.
     if (/^https?:\/\//i.test(contact)) return contact;
     const email = contact.replace(/^mailto:/i, '');
-    const subject = encodeURIComponent('PharmaOS support request');
+    const subject = encodeURIComponent('Pharma Ist support request');
     const body = encodeURIComponent(`Pharmacy: ${user?.tenantName ?? ''}\nUser: ${user?.name ?? ''} (${user?.email ?? ''})\n\nMy question:\n`);
     return `mailto:${email}?subject=${subject}&body=${body}`;
   };
@@ -91,7 +91,7 @@ export function HelpChatbot() {
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20"><Sparkles className="h-4 w-4" /></div>
           <div>
-            <p className="text-sm font-semibold leading-tight">PharmaOS Help</p>
+            <p className="text-sm font-semibold leading-tight">Pharma Ist Help</p>
             <p className="text-2xs opacity-80 leading-tight">Guides & how-to</p>
           </div>
         </div>

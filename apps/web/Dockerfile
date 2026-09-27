@@ -30,6 +30,14 @@ COPY --from=build /app/apps/web/.next ./apps/web/.next
 COPY --from=build /app/apps/web/public ./apps/web/public
 COPY --from=build /app/apps/web/package.json /app/apps/web/next.config.ts ./apps/web/
 
+# Next writes to .next/cache at runtime (ISR) — give the non-root user ownership.
+RUN chown -R node:node /app/apps/web/.next
+
 WORKDIR /app/apps/web
+USER node
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:3000/login || exit 1
+
 CMD ["npx", "next", "start", "-p", "3000"]

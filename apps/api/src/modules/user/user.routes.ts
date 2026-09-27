@@ -15,11 +15,21 @@ const t = (req: AuthRequest) => req.user!.tenantId;
 router.get('/', requirePermission('users', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.listUsers(t(req))); } catch (err) { next(err); }
 });
+router.get('/:id', requirePermission('users', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await userService.getUserById(t(req), req.params['id']!)); } catch (err) { next(err); }
+});
 router.post('/', requirePermission('users', 'create'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.createUser(t(req), req.body, req.user!.sub, req.user!.name), 'User invited', 201); } catch (err) { next(err); }
 });
 router.put('/:id', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.updateUser(t(req), req.params['id']!, req.body, req.user!.sub, req.user!.name)); } catch (err) { next(err); }
+});
+// Admin-initiated password reset — returns a one-time temporary password.
+router.post('/:id/reset-password', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await userService.resetUserPassword(t(req), req.params['id']!, req.user!.sub, req.user!.name);
+    sendSuccess(res, result, 'Password reset — share the temporary password securely');
+  } catch (err) { next(err); }
 });
 router.patch('/:id/status', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

@@ -44,8 +44,8 @@ router.get('/gstr1', requirePermission('reports', 'view'), async (req: AuthReque
     for (const bill of completed) {
       for (const item of bill.items) {
         const rate = item.gstRate ?? 0;
-        const taxable = Number((item.totalAmount - item.gstAmount).toFixed(2));
-        const half = Number((item.gstAmount / 2).toFixed(2));
+        const taxable = Number((Number(item.totalAmount) - Number(item.gstAmount)).toFixed(2));
+        const half = Number((Number(item.gstAmount) / 2).toFixed(2));
 
         const b2cs = b2csMap.get(rate) ?? { taxableValue: 0, cgst: 0, sgst: 0, igst: 0 };
         b2cs.taxableValue += taxable;
@@ -92,7 +92,7 @@ router.get('/gstr1', requirePermission('reports', 'view'), async (req: AuthReque
       totalTaxableValue: round2(b2cs.reduce((s, r) => s + r.taxableValue, 0)),
       totalCgst: round2(b2cs.reduce((s, r) => s + r.cgst, 0)),
       totalSgst: round2(b2cs.reduce((s, r) => s + r.sgst, 0)),
-      totalInvoiceValue: round2(completed.reduce((s, b) => s + b.totalAmount, 0)),
+      totalInvoiceValue: round2(completed.reduce((s, b) => s + Number(b.totalAmount), 0)),
       invoiceCount: completed.length,
     };
 
@@ -148,12 +148,12 @@ router.get('/export', requirePermission('reports', 'export'), async (req: AuthRe
       { header: 'Bill No', value: b => b.billNumber },
       { header: 'Customer', value: b => b.customerName ?? 'Walk-in' },
       { header: 'Items', value: b => b.items.length },
-      { header: 'Subtotal', value: b => b.subtotal },
-      { header: 'Discount', value: b => b.discountAmount },
-      { header: 'GST', value: b => b.taxAmount },
-      { header: 'Total', value: b => b.totalAmount },
-      { header: 'Paid', value: b => b.paidAmount },
-      { header: 'Balance', value: b => b.balanceAmount },
+      { header: 'Subtotal', value: b => Number(b.subtotal) },
+      { header: 'Discount', value: b => Number(b.discountAmount) },
+      { header: 'GST', value: b => Number(b.taxAmount) },
+      { header: 'Total', value: b => Number(b.totalAmount) },
+      { header: 'Paid', value: b => Number(b.paidAmount) },
+      { header: 'Balance', value: b => Number(b.balanceAmount) },
       { header: 'Payment Method', value: b => b.paymentMethod },
       { header: 'Status', value: b => b.status },
     ]);
@@ -171,8 +171,17 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
       return;
     }
     const days = raw;
-    const from = new Date(Date.now() - days * 86400000);
     const round2 = (n: number) => Number(n.toFixed(2));
+
+    // Bucket revenue by IST *calendar* days (not UTC), so a bill made this morning
+    // in India lands in "today" and "Today" means IST-midnight→now — previously
+    // UTC bucketing pushed late-evening/early-morning IST bills into the wrong day
+    // and made the today-graph miss same-day sales (Divya R186).
+    const IST_OFFSET_MS = 330 * 60 * 1000; // UTC+5:30
+    const istDateKey = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS).toISOString().split('T')[0]!;
+    const nowIst = new Date(Date.now() + IST_OFFSET_MS);
+    const istMidnightTodayMs = Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), nowIst.getUTCDate()) - IST_OFFSET_MS;
+    const from = new Date(istMidnightTodayMs - (days - 1) * 86400000);
 
     const [bills, items, scheduleLog, inventory, customersInPeriod] = await Promise.all([
       prisma.bill.findMany({
@@ -198,40 +207,42 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
       }),
     ]);
 
-    const totalRevenue = bills.reduce((s, b) => s + b.totalAmount, 0);
+    const totalRevenue = bills.reduce((s, b) => s + Number(b.totalAmount), 0);
     const totalBills = bills.length;
     const totalItems = items.reduce((s, i) => s + i.quantity, 0);
-    const totalGST = bills.reduce((s, b) => s + b.taxAmount, 0);
-    const totalDiscount = bills.reduce((s, b) => s + b.discountAmount, 0);
+    const totalGST = bills.reduce((s, b) => s + Number(b.taxAmount), 0);
+    const totalDiscount = bills.reduce((s, b) => s + Number(b.discountAmount), 0);
 
     // Gross profit — selling revenue minus purchase cost (medicine master purchase price)
-    const totalCost = items.reduce((s, i) => s + (i.medicine?.purchasePrice ?? i.sellingPrice * 0.8) * i.quantity, 0);
+    const totalCost = items.reduce((s, i) => s + (i.medicine?.purchasePrice != null ? Number(i.medicine.purchasePrice) : Number(i.sellingPrice) * 0.8) * i.quantity, 0);
     const grossProfit = round2(totalRevenue - totalGST - totalCost);
     const netRevenue = totalRevenue - totalGST;
     const grossMarginPct = netRevenue > 0 ? round2((grossProfit / netRevenue) * 100) : 0;
 
     // Payment method mix
-    const paymentMethods = { cash: 0, upi: 0, card: 0, credit: 0 };
+    // Attribute revenue only to the bill's ACTUAL payment method. Bills with no
+    // recorded method are NOT silently counted as cash (that wrongly inflated the
+    // cash figure — Divya R188); they go to an 'unspecified' bucket instead.
+    const paymentMethods = { cash: 0, upi: 0, card: 0, credit: 0, unspecified: 0 };
     for (const b of bills) {
-      const m = (b.paymentMethod ?? 'cash') as keyof typeof paymentMethods;
-      if (m in paymentMethods) paymentMethods[m] += b.totalAmount;
-      else paymentMethods.cash += b.totalAmount;
+      const m = b.paymentMethod as keyof typeof paymentMethods | undefined;
+      if (m && m in paymentMethods && m !== 'unspecified') paymentMethods[m] += Number(b.totalAmount);
+      else paymentMethods.unspecified += Number(b.totalAmount);
     }
 
     // Daily sales with payment split
     const dailyMap = new Map<string, { revenue: number; bills: number; gst: number; cash: number; upi: number; card: number; credit: number }>();
     for (let i = 0; i < days; i++) {
-      const d = new Date(Date.now() - (days - 1 - i) * 86400000);
-      dailyMap.set(d.toISOString().split('T')[0]!, { revenue: 0, bills: 0, gst: 0, cash: 0, upi: 0, card: 0, credit: 0 });
+      const key = istDateKey(new Date(istMidnightTodayMs - (days - 1 - i) * 86400000));
+      dailyMap.set(key, { revenue: 0, bills: 0, gst: 0, cash: 0, upi: 0, card: 0, credit: 0 });
     }
     for (const bill of bills) {
-      const key = bill.createdAt.toISOString().split('T')[0]!;
+      const key = istDateKey(bill.createdAt);
       const entry = dailyMap.get(key);
       if (entry) {
-        entry.revenue += bill.totalAmount; entry.bills++; entry.gst += bill.taxAmount;
-        const m = (bill.paymentMethod ?? 'cash') as 'cash' | 'upi' | 'card' | 'credit';
-        if (m in entry) entry[m] += bill.totalAmount;
-        else entry.cash += bill.totalAmount;
+        entry.revenue += Number(bill.totalAmount); entry.bills++; entry.gst += Number(bill.taxAmount);
+        const m = bill.paymentMethod as 'cash' | 'upi' | 'card' | 'credit' | undefined;
+        if (m && (m === 'cash' || m === 'upi' || m === 'card' || m === 'credit')) entry[m] += Number(bill.totalAmount);
       }
     }
     const dailySales = Array.from(dailyMap.entries()).map(([date, v]) => ({
@@ -255,8 +266,8 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
         scheduleH: item.medicine?.schedule === 'H' || item.medicine?.schedule === 'H1',
       };
       entry.qtySold += item.quantity;
-      entry.revenue += item.totalAmount;
-      entry.cost += (item.medicine?.purchasePrice ?? item.sellingPrice * 0.8) * item.quantity;
+      entry.revenue += Number(item.totalAmount);
+      entry.cost += (item.medicine?.purchasePrice != null ? Number(item.medicine.purchasePrice) : Number(item.sellingPrice) * 0.8) * item.quantity;
       medMap.set(item.medicineName, entry);
     }
     const topMedicines = Array.from(medMap.entries())
@@ -273,10 +284,10 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
     for (const item of items) {
       const cat = item.medicine?.category ?? 'other';
       const entry = catMap.get(cat) ?? { revenue: 0, bills: 0, gst: 0, cost: 0 };
-      entry.revenue += item.totalAmount;
+      entry.revenue += Number(item.totalAmount);
       entry.bills++;
-      entry.gst += item.gstAmount;
-      entry.cost += (item.medicine?.purchasePrice ?? item.sellingPrice * 0.8) * item.quantity;
+      entry.gst += Number(item.gstAmount);
+      entry.cost += (item.medicine?.purchasePrice != null ? Number(item.medicine.purchasePrice) : Number(item.sellingPrice) * 0.8) * item.quantity;
       catMap.set(cat, entry);
     }
     const catRevenueTotal = Array.from(catMap.values()).reduce((s, v) => s + v.revenue, 0);
@@ -294,8 +305,8 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
     for (const item of items) {
       const rate = item.gstRate ?? 0;
       const entry = slabMap.get(rate) ?? { taxable: 0, gst: 0 };
-      entry.taxable += item.totalAmount - item.gstAmount;
-      entry.gst += item.gstAmount;
+      entry.taxable += Number(item.totalAmount) - Number(item.gstAmount);
+      entry.gst += Number(item.gstAmount);
       slabMap.set(rate, entry);
     }
     const slabTaxableTotal = Array.from(slabMap.values()).reduce((s, v) => s + v.taxable, 0);
@@ -331,14 +342,14 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
 
     // Stock intelligence
     const soldMedicineIds = new Set(items.map(i => i.medicineId));
-    const totalStockValue = round2(inventory.reduce((s, i) => s + i.quantity * i.sellingPrice, 0));
+    const totalStockValue = round2(inventory.reduce((s, i) => s + i.quantity * Number(i.sellingPrice), 0));
     const deadStock = inventory
       .filter(i => !soldMedicineIds.has(i.medicineId))
       .map(i => ({
         name: i.medicine?.name ?? 'Unknown',
         category: i.medicine?.category ?? 'other',
         qty: i.quantity,
-        value: round2(i.quantity * i.sellingPrice),
+        value: round2(i.quantity * Number(i.sellingPrice)),
         lastSoldDays: days,
         batchExpiry: i.expiryDate.toISOString(),
       }))
@@ -351,12 +362,12 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
     const newCustomers = customersInPeriod.filter(c => c.createdAt >= from).length;
     const returningCustomers = customersInPeriod.filter(c => c.createdAt < from && billCustomerIds.has(c.id)).length;
     const topCustomers = customersInPeriod
-      .filter(c => c.totalSpend > 0)
-      .sort((a, b) => b.totalSpend - a.totalSpend)
+      .filter(c => Number(c.totalSpend) > 0)
+      .sort((a, b) => Number(b.totalSpend) - Number(a.totalSpend))
       .slice(0, 5)
       .map(c => ({
         name: c.name, phone: c.phone ?? '', visits: c.totalVisits,
-        totalSpend: round2(c.totalSpend), loyaltyPts: c.loyaltyPoints,
+        totalSpend: round2(Number(c.totalSpend)), loyaltyPts: c.loyaltyPoints,
         lastVisit: (c.lastVisitDate ?? c.createdAt).toISOString(),
       }));
 

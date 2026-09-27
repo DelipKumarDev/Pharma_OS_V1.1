@@ -1,7 +1,10 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, Search, Moon, Sun, ChevronDown, User, Lock, LogOut, Settings, Pill, Receipt, Users, X } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Bell, Search, Moon, Sun, ChevronDown, User, Lock, LogOut, Settings, Pill, Receipt, Users, X, WifiOff, RefreshCw, CloudOff, Compass, FileText, Truck, Building2 } from 'lucide-react';
+import { searchNav } from '@/lib/nav-index';
+import { useOffline } from '@/hooks/use-offline';
+import { syncQueue } from '@/lib/offline-sync';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -58,24 +61,30 @@ async function logoutApi(refreshToken: string) {
 
 interface SearchResult {
   id: string;
-  type: 'medicine' | 'customer' | 'bill' | 'vendor';
+  type: 'page' | 'medicine' | 'customer' | 'bill' | 'vendor' | 'prescription' | 'purchaseOrder';
   title: string;
   subtitle: string;
   href: string;
 }
 
 const TYPE_ICON: Record<string, React.ElementType> = {
+  page: Compass,
   medicine: Pill,
   customer: Users,
   bill: Receipt,
-  vendor: Users,
+  vendor: Building2,
+  prescription: FileText,
+  purchaseOrder: Truck,
 };
 
 const TYPE_LABEL: Record<string, string> = {
+  page: 'Page',
   medicine: 'Medicine',
   customer: 'Customer',
   bill: 'Bill',
   vendor: 'Vendor',
+  prescription: 'Rx',
+  purchaseOrder: 'PO',
 };
 
 function GlobalSearch() {
@@ -98,6 +107,12 @@ function GlobalSearch() {
     enabled: query.length >= 2 && !!tokens?.accessToken,
     staleTime: 10_000,
   });
+
+  // Menus / sub-menus / pages — matched instantly on the client from the nav index.
+  const pageResults = useMemo<SearchResult[]>(
+    () => searchNav(query, 6).map((n) => ({ id: `nav:${n.href}`, type: 'page', title: n.label, subtitle: n.group, href: n.href })),
+    [query],
+  );
 
   const focus = useCallback(() => {
     inputRef.current?.focus();
@@ -132,8 +147,36 @@ function GlobalSearch() {
     setQuery('');
   }
 
+  const ResultRow = ({ r }: { r: SearchResult }) => {
+    const Icon = TYPE_ICON[r.type] ?? Search;
+    return (
+      <li>
+        <button
+          className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/60 transition-colors"
+          onMouseDown={(e) => { e.preventDefault(); navigate(r.href); }}
+        >
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted">
+            <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-foreground">{r.title}</p>
+            <p className="truncate text-2xs text-muted-foreground">{r.subtitle}</p>
+          </div>
+          <Badge variant="muted" className="text-2xs shrink-0">{TYPE_LABEL[r.type]}</Badge>
+        </button>
+      </li>
+    );
+  };
+
+  const SectionHeader = ({ children }: { children: React.ReactNode }) => (
+    <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{children}</p>
+  );
+
+  const showDropdown = open && query.trim().length >= 1;
+  const noResults = query.trim().length >= 2 && !isFetching && pageResults.length === 0 && results.length === 0;
+
   return (
-    <div ref={containerRef} className="relative hidden max-w-sm flex-1 md:flex">
+    <div ref={containerRef} className="relative hidden max-w-md flex-1 md:flex">
       <div className="relative w-full">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
@@ -141,54 +184,85 @@ function GlobalSearch() {
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder="Search medicines, bills, patients…"
-          className="h-8 w-full rounded-lg border border-input bg-muted/50 pl-8 pr-14 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const first = pageResults[0] ?? results[0];
+              if (first) navigate(first.href);
+            }
+          }}
+          placeholder="Search anything — pages, medicines, bills, customers…"
+          className="h-8 w-full rounded-lg border border-input bg-muted/50 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
-        {query ? (
+        {query && (
           <button
             onClick={() => { setQuery(''); inputRef.current?.focus(); }}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
           </button>
-        ) : (
-          <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium opacity-70">
-            ⌘K
-          </kbd>
         )}
       </div>
 
-      {open && query.length >= 2 && (
+      {showDropdown && (
         <div className="absolute left-0 right-0 top-10 z-50 rounded-xl border border-border bg-card shadow-xl">
-          {isFetching ? (
-            <div className="px-4 py-3 text-xs text-muted-foreground">Searching…</div>
-          ) : results.length === 0 ? (
-            <div className="px-4 py-3 text-xs text-muted-foreground">No results for "{query}"</div>
+          {noResults ? (
+            <div className="px-4 py-3 text-xs text-muted-foreground">No results for &ldquo;{query}&rdquo;</div>
           ) : (
-            <ul className="max-h-72 overflow-y-auto py-1">
-              {results.map((r) => {
-                const Icon = TYPE_ICON[r.type] ?? Search;
-                return (
-                  <li key={r.id}>
-                    <button
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/60 transition-colors"
-                      onClick={() => navigate(r.href)}
-                    >
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted">
-                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-foreground">{r.title}</p>
-                        <p className="truncate text-2xs text-muted-foreground">{r.subtitle}</p>
-                      </div>
-                      <Badge variant="muted" className="text-2xs shrink-0">{TYPE_LABEL[r.type]}</Badge>
-                    </button>
-                  </li>
-                );
-              })}
+            <ul className="max-h-[26rem] overflow-y-auto py-1">
+              {pageResults.length > 0 && <SectionHeader>Menus &amp; Pages</SectionHeader>}
+              {pageResults.map((r) => <ResultRow key={r.id} r={r} />)}
+
+              {query.trim().length >= 2 && (
+                isFetching ? (
+                  <div className="px-3 py-2.5 text-xs text-muted-foreground">Searching records…</div>
+                ) : results.length > 0 ? (
+                  <>
+                    <SectionHeader>Records</SectionHeader>
+                    {results.map((r) => <ResultRow key={r.id} r={r} />)}
+                  </>
+                ) : null
+              )}
             </ul>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Connectivity + offline sync-queue indicator. Hidden entirely when online with
+// nothing pending; otherwise shows an offline badge and/or a pending-sync pill
+// that syncs on click.
+function OfflineIndicator() {
+  const { online, pending } = useOffline();
+  const [syncing, setSyncing] = React.useState(false);
+  if (online && pending === 0) return null;
+
+  async function handleSync() {
+    setSyncing(true);
+    const r = await syncQueue();
+    setSyncing(false);
+    if (r.synced > 0) toast.success(`Synced ${r.synced} offline bill${r.synced === 1 ? '' : 's'}`);
+    else if (r.failed > 0) toast.error(`${r.failed} offline bill(s) need attention`);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {!online && (
+        <span className="hidden items-center gap-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive sm:flex" title="No internet — sales are being saved locally">
+          <WifiOff className="h-3.5 w-3.5" /> Offline
+        </span>
+      )}
+      {pending > 0 && (
+        <button
+          onClick={handleSync}
+          disabled={syncing || !online}
+          title={online ? 'Click to sync pending offline records' : 'Will sync when back online'}
+          className="flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs font-semibold text-warning-700 transition-colors hover:bg-warning/20 disabled:opacity-70"
+        >
+          {syncing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CloudOff className="h-3.5 w-3.5" />}
+          {pending} pending
+        </button>
       )}
     </div>
   );
@@ -236,7 +310,7 @@ export function Header({ breadcrumb }: HeaderProps) {
   const displayName = user?.name ?? 'User';
   const displayEmail = user?.email ?? '';
   const displayRole = user?.roles?.[0] ?? 'Staff';
-  const tenantName = user?.tenantName ?? 'PharmaOS';
+  const tenantName = user?.tenantName ?? 'Pharma Ist';
 
   return (
     <header
@@ -255,9 +329,13 @@ export function Header({ breadcrumb }: HeaderProps) {
         <GlobalSearch />
 
         <div className="ml-auto flex items-center gap-1.5">
-          {/* Tenant chip */}
+          <OfflineIndicator />
+          {/* Tenant chip — shows the pharmacy's own logo when configured */}
           <div className="hidden items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2.5 py-1 md:flex">
-            <div className="h-2 w-2 rounded-full bg-success" />
+            {user?.logoUrl
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={user.logoUrl} alt={tenantName} className="h-4 w-4 rounded object-contain" />
+              : <div className="h-2 w-2 rounded-full bg-success" />}
             <span className="text-xs font-medium text-foreground">{tenantName}</span>
           </div>
 
@@ -309,7 +387,7 @@ export function Header({ breadcrumb }: HeaderProps) {
                   <DropdownMenuItem
                     key={n.id}
                     className="flex-col items-start gap-0.5 py-3"
-                    onClick={() => router.push('/notifications')}
+                    onClick={() => router.push(`/notifications?id=${n.id}`)}
                   >
                     <div className="flex w-full items-start gap-2">
                       <div
@@ -357,7 +435,7 @@ export function Header({ breadcrumb }: HeaderProps) {
                 <p className="text-xs font-normal text-muted-foreground">{displayEmail}</p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push('/settings?tab=profile')}>
+              <DropdownMenuItem onClick={() => router.push('/users')}>
                 <User className="mr-2 h-4 w-4" />
                 Profile settings
               </DropdownMenuItem>
@@ -365,7 +443,7 @@ export function Header({ breadcrumb }: HeaderProps) {
                 <Lock className="mr-2 h-4 w-4" />
                 Change password
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push('/settings')}>
+              <DropdownMenuItem onClick={() => router.push('/settings?tab=preferences')}>
                 <Settings className="mr-2 h-4 w-4" />
                 Preferences
               </DropdownMenuItem>

@@ -2,6 +2,7 @@ import { Prisma, CustomerType, CustomerStatus, Gender } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { paginate } from '../../utils/response';
+import { createAuditLog } from '../../utils/audit';
 
 export async function getCustomerStats(tenantId: string) {
   const [total, regular, vip, credit, outstanding] = await Promise.all([
@@ -64,7 +65,7 @@ export async function listCustomers(tenantId: string, query: Record<string, stri
   };
 
   const [customers, total] = await Promise.all([
-    prisma.customer.findMany({ where, skip, take: limit, orderBy: { name: 'asc' } }),
+    prisma.customer.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
     prisma.customer.count({ where }),
   ]);
 
@@ -140,4 +141,29 @@ export async function getCustomerPurchases(tenantId: string, customerId: string)
   }));
 
   return paginate(purchases, purchases.length, 1, 50);
+}
+
+// Record a credit repayment from a customer — reduces their outstanding credit
+// balance. Returns the updated customer.
+export async function recordCustomerPayment(tenantId: string, id: string, input: Record<string, unknown>, userId: string) {
+  const customer = await prisma.customer.findFirst({ where: { id, tenantId, deletedAt: null } });
+  if (!customer) throw new AppError('Customer not found', 404);
+
+  const amount = Number(input['amount']);
+  if (!amount || isNaN(amount) || amount <= 0) throw new AppError('Enter a valid payment amount', 422);
+  const bal = Number(customer.creditBalance);
+  if (amount > bal + 0.01) {
+    throw new AppError(`Amount exceeds the outstanding credit balance of ₹${bal.toFixed(2)}`, 422);
+  }
+
+  const newBalance = Math.max(0, Number((bal - amount).toFixed(2)));
+  const updated = await prisma.customer.update({ where: { id }, data: { creditBalance: newBalance } });
+
+  await createAuditLog({
+    tenantId, userId, module: 'customer', action: 'payment',
+    entityId: id, entityName: customer.name,
+    description: `Credit payment ₹${amount.toFixed(2)} via ${(input['paymentMode'] as string) ?? 'cash'}${input['referenceNumber'] ? ` (ref ${input['referenceNumber']})` : ''} — balance ₹${bal.toFixed(2)} → ₹${newBalance.toFixed(2)}`,
+  });
+
+  return { id: updated.id, name: updated.name, creditBalance: updated.creditBalance, amountPaid: amount };
 }

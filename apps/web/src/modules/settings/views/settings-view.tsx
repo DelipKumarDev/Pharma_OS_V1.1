@@ -10,11 +10,16 @@ import {
   Package, Pill, Receipt, Banknote, Smartphone, BookOpen,
   ChevronRight, Info, Mail, MessageCircle, PhoneCall,
   FormInput, ShieldCheck, UserCog, Shield, ClipboardList, ExternalLink,
-  MessageSquare, Plus,
+  MessageSquare, Plus, ListChecks, Lock, Eye, EyeOff, Sparkles,
+  Plug, KeyRound, ArrowLeft,
 } from 'lucide-react';
+import { useAuthStore } from '@/store/auth-store';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { FormFieldsSection } from '../components/form-fields-section';
 import { AccessControlSection } from '../components/access-control-section';
+import { DropdownOptionsSection } from '../components/dropdown-options-section';
+import type { DropdownDef } from '@/lib/dropdowns';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { setActiveCurrency, setActiveDateFormat } from '@pharmaos/utils';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +41,10 @@ type SettingsData = {
   billing: Record<string, unknown>;
   notifications: Record<string, boolean | string>;
   templates?: { values: Record<string, string>; variables: Record<string, string[]> };
+  dropdowns?: { registry: DropdownDef[]; values: Record<string, string[]> };
+  receipt?: Record<string, boolean | string>;
+  menuAccess?: Record<string, Record<string, boolean>>;
+  formFields?: Record<string, unknown>;
 };
 
 async function fetchSettings(): Promise<SettingsData> {
@@ -128,25 +138,48 @@ function SaveBar({ onSave, saving }: { onSave: () => void; saving: boolean }) {
 function ProfileSection({ data, onSave }: { data: SettingsData; onSave: (section: string, d: Record<string, unknown>) => Promise<void> }) {
   const [form, setForm] = useState({ ...data.profile });
   const [saving, setSaving] = useState(false);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  // Initialise the preview from the saved logo so it stays visible after reload.
+  const [logoPreview, setLogoPreview] = useState<string | null>(() => (data.profile?.logoUrl as string) ?? null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const patchUser = useAuthStore((s) => s.patchUser);
 
   function set(k: string, v: string) { setForm((p) => ({ ...p, [k]: v })); }
 
   async function save() {
     setSaving(true);
     await onSave('profile', form);
+    // The pharmacy name is the display name in the header, dashboard and receipts
+    // (cached on the auth user); refresh it so the change shows without re-login.
+    const newName = String(form.pharmacyName ?? '').trim();
+    patchUser({ ...(newName ? { tenantName: newName } : {}), logoUrl: (form.logoUrl as string) || undefined });
     setSaving(false);
     toast.success('Pharmacy profile saved');
   }
 
+  // Read the logo, downscale it (max 400px) to a compact PNG data URL, and store
+  // it on the form so it's saved with the profile (and survives reload / receipts).
   function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast.error('Logo too large (max 2MB)'); return; }
     const reader = new FileReader();
-    reader.onload = (ev) => setLogoPreview(ev.target?.result as string);
+    reader.onload = (ev) => {
+      const raw = ev.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const max = 400;
+        let { width, height } = img;
+        if (width > max || height > max) { const s = max / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s); }
+        const c = document.createElement('canvas'); c.width = width; c.height = height;
+        const ctx = c.getContext('2d');
+        const url = ctx ? (ctx.drawImage(img, 0, 0, width, height), c.toDataURL('image/png')) : raw;
+        setLogoPreview(url); setForm((p) => ({ ...p, logoUrl: url }));
+      };
+      img.onerror = () => { setLogoPreview(raw); setForm((p) => ({ ...p, logoUrl: raw })); };
+      img.src = raw;
+    };
     reader.readAsDataURL(file);
-    toast.success('Logo uploaded — will appear on receipts');
+    toast.success('Logo uploaded — save to keep it');
   }
 
   return (
@@ -183,12 +216,13 @@ function ProfileSection({ data, onSave }: { data: SettingsData; onSave: (section
         </FieldRow>
         <FieldRow label="Pharmacy Type">
           <Select value={String(form.pharmacyType ?? '')} onValueChange={(v) => set('pharmacyType', v)}>
-            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select type" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="Retail Pharmacy">Retail Pharmacy</SelectItem>
-              <SelectItem value="Hospital Pharmacy">Hospital Pharmacy</SelectItem>
-              <SelectItem value="Wholesale">Wholesale / Distributor</SelectItem>
-              <SelectItem value="Online Pharmacy">Online Pharmacy</SelectItem>
+              <SelectItem value="retail">Retail Pharmacy</SelectItem>
+              <SelectItem value="hospital">Hospital Pharmacy</SelectItem>
+              <SelectItem value="wholesale">Wholesale / Distributor</SelectItem>
+              <SelectItem value="clinic">Clinic Pharmacy</SelectItem>
+              <SelectItem value="chain">Chain / Multi-store</SelectItem>
             </SelectContent>
           </Select>
         </FieldRow>
@@ -340,10 +374,11 @@ function ImportSection() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const IMPORT_TYPES = [
+    { value: 'opening-stock', label: 'Opening Stock (Onboarding)', Icon: Sparkles, desc: 'One sheet → creates medicines AND their stock batches', ext: '.xlsx .csv' },
     { value: 'medicines', label: 'Medicine Catalog', Icon: Pill, desc: 'Drug master list with prices and GST', ext: '.xlsx .csv' },
-    { value: 'inventory', label: 'Inventory / Stock', Icon: Package, desc: 'Current stock with batches and expiry', ext: '.xlsx .csv' },
+    { value: 'inventory', label: 'Inventory / Stock', Icon: Package, desc: 'Stock batches for medicines already in the master', ext: '.xlsx .csv' },
     { value: 'customers', label: 'Customers', Icon: Users, desc: 'Customer names, phones and addresses', ext: '.xlsx .csv' },
-    { value: 'vendors', label: 'Vendors / Suppliers', Icon: Building2, desc: 'Supplier list with payment terms', ext: '.csv' },
+    { value: 'vendors', label: 'Vendors / Suppliers', Icon: Building2, desc: 'Supplier list with payment terms', ext: '.xlsx .csv' },
   ];
 
   const EXPORT_TYPES = [
@@ -386,18 +421,30 @@ function ImportSection() {
     return rows.slice(1).map((r) => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? '').trim()])));
   }
 
+  // Accepts .xlsx/.xls (parsed with SheetJS) or .csv, returning row objects.
+  async function parseFile(f: File): Promise<Array<Record<string, string>>> {
+    if (/\.(xlsx|xls)$/i.test(f.name)) {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]!];
+      if (!sheet) return [];
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false }) as Array<Record<string, unknown>>;
+      return json.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim(), String(v ?? '').trim()])));
+    }
+    return parseCsv(await f.text());
+  }
+
   async function startImport() {
     if (!file) return;
-    if (!/\.csv$/i.test(file.name)) {
-      toast.error('Please upload a .csv file', { description: 'Open your Excel file and use "Save As → CSV" first.' });
+    if (!/\.(csv|xlsx|xls)$/i.test(file.name)) {
+      toast.error('Unsupported file', { description: 'Upload an Excel (.xlsx/.xls) or .csv file.' });
       return;
     }
     setPhase('importing');
     setProgress(0);
     const iv = setInterval(() => setProgress((p) => Math.min(p + 4 + Math.random() * 6, 90)), 150);
     try {
-      const text = await file.text();
-      const rows = parseCsv(text);
+      const rows = await parseFile(file);
       if (rows.length === 0) throw new Error('File has no data rows (header + at least one row required)');
       const res = await apiFetch(`/api/settings/import/${type}`, {
         method: 'POST',
@@ -439,24 +486,27 @@ function ImportSection() {
   }
 
   const TEMPLATE_HEADERS: Record<string, string[]> = {
-    medicines: ['Medicine Name', 'Generic Name', 'Manufacturer', 'Category', 'Dosage Form', 'Strength', 'Schedule', 'MRP', 'Selling Price', 'HSN Code', 'GST %'],
-    inventory: ['Medicine Name', 'Batch Number', 'Qty', 'Purchase Price', 'MRP', 'Expiry Date (MM/YYYY)', 'Rack Location'],
-    customers: ['Name', 'Phone', 'Email', 'Address', 'City', 'Date of Birth', 'Notes'],
+    'opening-stock': ['Medicine Name', 'Generic Name', 'Manufacturer', 'Category', 'Dosage Form', 'Strength', 'Schedule', 'HSN Code', 'GST %', 'MRP', 'Selling Price', 'Purchase Price', 'Batch Number', 'Qty', 'Expiry Date (MM/YYYY)', 'Rack Location'],
+    medicines: ['Medicine Name', 'Generic Name', 'Manufacturer', 'Category', 'Dosage Form', 'Strength', 'Schedule', 'MRP', 'Selling Price', 'Purchase Price', 'HSN Code', 'GST %'],
+    inventory: ['Medicine Name', 'Batch Number', 'Qty', 'Purchase Price', 'MRP', 'Selling Price', 'Manufacturing Date', 'Expiry Date (MM/YYYY)', 'Supplier Name', 'Rack Location'],
+    customers: ['Name', 'Phone', 'Email', 'Address', 'Date of Birth', 'Gender', 'Doctor Name', 'Customer Type', 'Notes'],
     vendors: ['Company Name', 'Contact Person', 'Phone', 'Email', 'Address', 'GST Number', 'Payment Terms (days)', 'Credit Limit'],
   };
 
   function downloadTemplate() {
     const headers = TEMPLATE_HEADERS[type];
     if (!headers) { toast.error('No template for this type'); return; }
-    const sample = type === 'medicines'
-      ? '\r\nParacetamol 650mg,Paracetamol,GSK India,analgesic,tablet,650mg,,25,22,30049099,12'
+    const sample = type === 'opening-stock'
+      ? '\r\nParacetamol 650mg,Paracetamol,GSK India,analgesic,tablet,650mg,,30049099,12,25,22,18,PCM24A,200,12/2027,A-01'
+      : type === 'medicines'
+      ? '\r\nParacetamol 650mg,Paracetamol,GSK India,analgesic,tablet,650mg,,25,22,18,30049099,12'
       : '';
     const a = Object.assign(document.createElement('a'), {
       href: URL.createObjectURL(new Blob([headers.join(',') + sample], { type: 'text/csv' })),
       download: `pharmaos-${type}-template.csv`,
     });
     a.click();
-    toast.success('Template downloaded — fill it in Excel, save as CSV, then upload');
+    toast.success('Template downloaded — fill it in Excel and upload the .xlsx directly (or save as CSV)');
   }
 
   function reset() { setFile(null); setPhase('idle'); setProgress(0); setResult(null); }
@@ -768,7 +818,7 @@ function NotificationsSection({ data, onSave }: { data: SettingsData; onSave: (s
 
         <div className="rounded-xl border border-border p-4 space-y-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Alert Channels</p>
-          <ToggleRow icon={<Globe className="h-3.5 w-3.5 text-muted-foreground" />} label="In-App Notifications" description="Alerts inside PharmaOS (always on)" checked={true} onChange={() => {}} />
+          <ToggleRow icon={<Globe className="h-3.5 w-3.5 text-muted-foreground" />} label="In-App Notifications" description="Alerts inside Pharma Ist (always on)" checked={true} onChange={() => {}} />
           <ToggleRow icon={<Mail className="h-3.5 w-3.5 text-muted-foreground" />} label="Email Alerts" description="Send alerts to your registered email" checked={Boolean(form.emailAlerts)} onChange={() => toggle('emailAlerts')} />
           <ToggleRow icon={<MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />} label="WhatsApp Alerts" description="Receive alerts via WhatsApp Business" checked={Boolean(form.whatsappAlerts)} onChange={() => toggle('whatsappAlerts')} />
           <ToggleRow icon={<PhoneCall className="h-3.5 w-3.5 text-muted-foreground" />} label="SMS Alerts" description="Text message alerts (per-SMS charges apply)" checked={Boolean(form.smsAlerts)} onChange={() => toggle('smsAlerts')} />
@@ -789,6 +839,10 @@ function SystemSection({ data, onSave }: { data: SettingsData; onSave: (s: strin
   async function save() {
     setSaving(true);
     await onSave('system', form);
+    // Apply localization immediately so currency/date formatting updates app-wide
+    // without a reload (persisted for other sessions via /me self-heal).
+    setActiveCurrency(form.currency as string | undefined);
+    setActiveDateFormat(form.dateFormat as string | undefined);
     setSaving(false);
     toast.success('System settings saved');
   }
@@ -873,125 +927,418 @@ function SystemSection({ data, onSave }: { data: SettingsData; onSave: (s: strin
   );
 }
 
+// ─── Security (Change Password) — TC_024 ───────────────────────────────────────
+
+function SecuritySection() {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [show, setShow] = useState({ current: false, next: false, confirm: false });
+  const [saving, setSaving] = useState(false);
+
+  function set(k: keyof typeof form, v: string) { setForm((p) => ({ ...p, [k]: v })); }
+
+  const rules = [
+    { ok: form.newPassword.length >= 8, label: 'At least 8 characters' },
+    { ok: /[A-Z]/.test(form.newPassword), label: 'One uppercase letter' },
+    { ok: /[a-z]/.test(form.newPassword), label: 'One lowercase letter' },
+    { ok: /[0-9]/.test(form.newPassword), label: 'One number' },
+    { ok: /[@$!%*?&#]/.test(form.newPassword), label: 'One special character (@$!%*?&#)' },
+  ];
+  const allValid = rules.every((r) => r.ok);
+  const matches = form.newPassword.length > 0 && form.newPassword === form.confirmPassword;
+
+  async function save() {
+    if (!form.currentPassword) { toast.error('Enter your current password'); return; }
+    if (!allValid) { toast.error('New password does not meet the requirements'); return; }
+    if (!matches) { toast.error('New password and confirmation do not match'); return; }
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/auth/password/change', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }),
+      });
+      const j = await r.json() as { success: boolean; message?: string };
+      if (!r.ok || !j.success) throw new Error(j.message ?? 'Could not change password');
+      toast.success('Password changed successfully');
+      setForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      toast.error('Could not change password', { description: (err as Error).message });
+    } finally { setSaving(false); }
+  }
+
+  const PwInput = ({ field, showKey, placeholder }: { field: keyof typeof form; showKey: keyof typeof show; placeholder: string }) => (
+    <div className="relative">
+      <Input
+        type={show[showKey] ? 'text' : 'password'}
+        value={form[field]}
+        onChange={(e) => set(field, e.target.value)}
+        className="h-8 text-sm pr-9"
+        placeholder={placeholder}
+        autoComplete={showKey === 'current' ? 'current-password' : 'new-password'}
+      />
+      <button type="button" onClick={() => setShow((p) => ({ ...p, [showKey]: !p[showKey] }))}
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+        {show[showKey] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      <SectionHeader title="Change Password" description="Update your account password. Choose a strong, unique password." />
+      <div className="max-w-md space-y-4">
+        <div className="space-y-1">
+          <Label className="text-xs">Current Password</Label>
+          <PwInput field="currentPassword" showKey="current" placeholder="Enter current password" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">New Password</Label>
+          <PwInput field="newPassword" showKey="next" placeholder="Enter new password" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Confirm New Password</Label>
+          <PwInput field="confirmPassword" showKey="confirm" placeholder="Re-enter new password" />
+          {form.confirmPassword.length > 0 && !matches && (
+            <p className="text-xs text-destructive">Passwords do not match</p>
+          )}
+        </div>
+        <div className="rounded-lg bg-muted/40 p-3">
+          <p className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Password must contain</p>
+          <ul className="space-y-0.5">
+            {rules.map((r) => (
+              <li key={r.label} className={cn('flex items-center gap-1.5 text-xs', r.ok ? 'text-success' : 'text-muted-foreground')}>
+                <CheckCircle className={cn('h-3 w-3', r.ok ? 'opacity-100' : 'opacity-30')} /> {r.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="flex justify-end border-t border-border pt-4">
+          <Button onClick={save} disabled={saving || !allValid || !matches || !form.currentPassword}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />} Update Password
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-const SECTIONS = [
+// Paper-size options (chosen in Settings, applied at print time in billing).
+const PAPER_OPTIONS: { value: string; label: string; hint: string }[] = [
+  { value: 'thermal80', label: '80mm Thermal', hint: 'Standard retail POS roll (72mm print)' },
+  { value: 'thermal58', label: '58mm Thermal', hint: 'Compact roll printer (48mm print)' },
+  { value: 'a5', label: 'A5 Invoice', hint: 'Half-page GST tax invoice' },
+  { value: 'a4', label: 'A4 Invoice', hint: 'Full-page GST tax invoice (wholesale / B2B)' },
+];
+
+// Grouped receipt toggles. `paperSize` is handled separately as a selector.
+const RECEIPT_TOGGLE_GROUPS: { group: string; items: { key: string; label: string; desc: string }[] }[] = [
+  {
+    group: 'Pharmacy Identity',
+    items: [
+      { key: 'showAddress', label: 'Address', desc: 'Print your shop address block' },
+      { key: 'showPhone', label: 'Phone / Email', desc: 'Print your contact details in the header' },
+      { key: 'showGstin', label: 'GSTIN', desc: 'Print your GST registration number' },
+      { key: 'showDrugLicense', label: 'Drug Licence No.', desc: 'Print your DL number (20B/21B) — required on a pharmacy bill' },
+      { key: 'showLicense', label: 'Other Licence No.', desc: 'Print an additional licence/registration number' },
+    ],
+  },
+  {
+    group: 'Line-item Detail',
+    items: [
+      { key: 'showBatch', label: 'Batch Number', desc: "Print each item's batch number" },
+      { key: 'showExpiry', label: 'Expiry Date', desc: "Print each item's expiry (MM/YY)" },
+      { key: 'showHsn', label: 'HSN Code', desc: 'Show the HSN column (A5/A4 tax invoice)' },
+      { key: 'showGstBreakdown', label: 'GST Breakdown', desc: 'Show rate-wise CGST / SGST split' },
+      { key: 'showDoctor', label: 'Doctor Name', desc: 'Print the prescribing doctor' },
+    ],
+  },
+  {
+    group: 'Extras',
+    items: [
+      { key: 'showSavings', label: 'Customer Savings', desc: 'Show "You saved ₹…" vs MRP' },
+      { key: 'showCashier', label: 'Cashier Name', desc: 'Print who billed the sale' },
+      { key: 'showQr', label: 'QR Code', desc: 'Print a scannable bill/UPI QR' },
+      { key: 'showPoweredBy', label: 'Powered by Pharma Ist', desc: 'Small credit line in the footer' },
+      { key: 'compact', label: 'Compact Mode', desc: 'Minimal layout — shorter thermal receipt' },
+    ],
+  },
+];
+
+function ReceiptSection({ data, onSave }: { data: SettingsData; onSave: (s: string, d: Record<string, unknown>) => Promise<void> }) {
+  const [form, setForm] = useState<Record<string, boolean | string>>({ paperSize: 'thermal80', ...(data.receipt ?? {}) });
+  const [saving, setSaving] = useState(false);
+  const paperSize = (form.paperSize as string) ?? 'thermal80';
+  async function save() { setSaving(true); await onSave('receipt', form); setSaving(false); toast.success('Receipt configuration saved'); }
+  return (
+    <div>
+      <SectionHeader title="Receipt Configuration" description="Pick the print size and choose what appears on the bill. Changes apply to the very next print — no reload needed." />
+
+      {/* Paper size selector */}
+      <div className="mb-5">
+        <p className="text-sm font-semibold mb-1">Print Size</p>
+        <p className="text-xs text-muted-foreground mb-3">The bill prints in this format on every terminal for your pharmacy.</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {PAPER_OPTIONS.map((opt) => {
+            const active = paperSize === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setForm((p) => ({ ...p, paperSize: opt.value }))}
+                className={cn(
+                  'flex flex-col items-start gap-0.5 rounded-xl border p-3 text-left transition-all',
+                  active ? 'border-primary/50 bg-primary/5 ring-2 ring-primary/20' : 'border-border hover:bg-muted',
+                )}
+              >
+                <div className="flex w-full items-center justify-between">
+                  <span className="text-sm font-semibold">{opt.label}</span>
+                  {active && <CheckCircle className="h-4 w-4 text-primary" />}
+                </div>
+                <span className="text-2xs text-muted-foreground leading-tight">{opt.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Toggle groups */}
+      <div className="space-y-4">
+        {RECEIPT_TOGGLE_GROUPS.map(({ group, items }) => (
+          <div key={group} className="rounded-xl border border-border p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">{group}</p>
+            {items.map(({ key, label, desc }) => (
+              <ToggleRow key={key} label={label} description={desc} checked={!!form[key]} onChange={(v) => setForm((p) => ({ ...p, [key]: v }))} />
+            ))}
+          </div>
+        ))}
+      </div>
+      <SaveBar onSave={save} saving={saving} />
+    </div>
+  );
+}
+
+interface SectionMeta { id: string; label: string; icon: React.ElementType; description: string; }
+
+const SECTIONS: SectionMeta[] = [
   { id: 'profile',        label: 'Pharmacy Profile', icon: Store,        description: 'Name, logo, license, address' },
+  { id: 'security',       label: 'Change Password',  icon: Lock,         description: 'Update your account password' },
   { id: 'tax',            label: 'Tax & Billing',    icon: CreditCard,   description: 'GST, payment methods, receipts' },
+  { id: 'receipt',        label: 'Receipt Configuration', icon: Receipt, description: 'What prints on customer bills' },
   { id: 'import',         label: 'Import & Export',  icon: Upload,       description: 'Migration, bulk import, backup' },
   { id: 'notifications',  label: 'Notifications',    icon: Bell,         description: 'Alerts and report preferences' },
   { id: 'templates',      label: 'Message Templates', icon: MessageSquare, description: 'Notification & WhatsApp/SMS wording' },
-  { id: 'system',         label: 'System',           icon: Settings2,    description: 'Localization, thresholds, backup' },
+  { id: 'system',         label: 'Preferences',      icon: Settings2,    description: 'Localization, thresholds, backup' },
+  { id: 'dropdowns',      label: 'Dropdown Options', icon: ListChecks,   description: 'Configure list options app-wide' },
   { id: 'form-fields',    label: 'Form Fields',      icon: FormInput,    description: 'Add, rename or disable fields' },
   { id: 'access-control', label: 'Access Control',   icon: ShieldCheck,  description: 'Menu & tab visibility per role' },
 ];
+const SECTION_MAP: Record<string, SectionMeta> = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
+
+interface DomainLink { href: string; label: string; icon: React.ElementType; perm?: string; }
+interface Domain {
+  id: string; emoji: string; label: string; description: string;
+  sections: string[]; links?: DomainLink[]; adminOnly?: boolean;
+}
+
+// Configuration domains — the Settings "home" is a grid of these cards. Each
+// card drills into a section (rendered on the right) or links out to a page.
+const DOMAINS: Domain[] = [
+  {
+    id: 'pharmacy', emoji: '🏥', label: 'Pharmacy Configuration',
+    description: 'Identity, licensing, tax and receipts',
+    sections: ['profile', 'tax', 'receipt'],
+  },
+  {
+    id: 'communication', emoji: '📨', label: 'Communication',
+    description: 'Alerts, message wording and channels',
+    sections: ['notifications', 'templates'],
+    links: [{ href: '/integrations', label: 'Integrations', icon: Plug }],
+  },
+  {
+    id: 'data', emoji: '📂', label: 'Data Management',
+    description: 'Import, export, backup and restore',
+    sections: ['import'],
+  },
+  {
+    id: 'customization', emoji: '🎨', label: 'Customization',
+    description: 'Dropdown options and form fields',
+    sections: ['dropdowns', 'form-fields'],
+  },
+  {
+    id: 'system', emoji: '⚙️', label: 'System Preferences',
+    description: 'Localization, thresholds and account security',
+    sections: ['system', 'security'],
+  },
+  {
+    id: 'administration', emoji: '🛡️', label: 'Administration',
+    description: 'Access control, users, roles and audit',
+    sections: ['access-control'], adminOnly: true,
+    links: [
+      { href: '/users', label: 'User Management', icon: UserCog, perm: 'users:view' },
+      { href: '/roles', label: 'Roles & Permissions', icon: Shield, perm: 'users:view' },
+      { href: '/permissions', label: 'Permissions Matrix', icon: KeyRound, perm: 'users:view' },
+      // Audit Log lives ONLY here (removed from the Compliance sidebar group).
+      // Gated by RBAC: granting/revoking `settings:view` on a role activates/
+      // deactivates it — the /audit API requires the same permission.
+      { href: '/audit', label: 'Audit Log', icon: ClipboardList, perm: 'settings:view' },
+    ],
+  },
+];
+const DOMAIN_OF: Record<string, Domain> = Object.fromEntries(
+  DOMAINS.flatMap((d) => d.sections.map((s) => [s, d]))
+);
+
+// Query-param aliases from other screens (e.g. header user menu) → section id.
+const TAB_ALIASES: Record<string, string> = {
+  profile: 'profile', security: 'security', preferences: 'system', system: 'system',
+};
+
+// Resolve a ?tab= value (alias or real section id) to a section, or null (home).
+function tabToSection(tab: string | null): string | null {
+  if (!tab) return null;
+  return TAB_ALIASES[tab] ?? (SECTIONS.some((s) => s.id === tab) ? tab : null);
+}
 
 export function SettingsView() {
-  const [activeSection, setActiveSection] = useState('profile');
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
+
+  // The open sub-section is driven by the URL (?tab=). This makes the browser
+  // Back button work AND lets the sidebar "Settings" link (href="/settings")
+  // return to the Settings home from any sub-section — clicking it clears ?tab,
+  // which resets `active` to null.
+  const tabParam = searchParams.get('tab');
+  const [active, setActive] = useState<string | null>(() => tabToSection(tabParam));
+  React.useEffect(() => { setActive(tabToSection(tabParam)); }, [tabParam]);
+
+  // Open a section (or go home with null) by updating the URL.
+  const openSection = React.useCallback((id: string | null) => {
+    router.push(id ? `/settings?tab=${id}` : '/settings', { scroll: false });
+  }, [router]);
+
+  // Select the array itself (stable ref) — never `?? []` inside the selector, or
+  // Zustand returns a new array each render → infinite update loop.
+  const permissions = useAuthStore((s) => s.user?.permissions);
+  const isAdmin = !!permissions && (permissions.includes('settings:edit') || permissions.includes('users:view'));
 
   const { data, isLoading } = useQuery({ queryKey: ['settings'], queryFn: fetchSettings });
 
   const mutation = useMutation({
     mutationFn: ({ section, payload }: { section: string; payload: Record<string, unknown> }) =>
       saveSection(section, payload),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      // Billing reads pharmacy settings (UPI ID, licence, phone) under its own
+      // key — refresh it too so saved changes reflect at the till immediately.
+      qc.invalidateQueries({ queryKey: ['billing-pharmacy-settings'] });
+    },
   });
 
   async function onSave(section: string, payload: Record<string, unknown>) {
     await mutation.mutateAsync({ section, payload });
   }
 
+  function renderSection(id: string) {
+    if (!data) return null;
+    switch (id) {
+      case 'profile':        return <ProfileSection data={data} onSave={onSave} />;
+      case 'security':       return <SecuritySection />;
+      case 'tax':            return <TaxSection data={data} onSave={onSave} />;
+      case 'receipt':        return <ReceiptSection data={data} onSave={onSave} />;
+      case 'import':         return <ImportSection />;
+      case 'notifications':  return <NotificationsSection data={data} onSave={onSave} />;
+      case 'templates':      return <TemplatesSection data={data} onSave={onSave} />;
+      case 'system':         return <SystemSection data={data} onSave={onSave} />;
+      case 'dropdowns':      return <DropdownOptionsSection dropdowns={data.dropdowns} onSaved={(values) => patchUser({ dropdownOptions: values })} />;
+      case 'form-fields':    return <FormFieldsSection formFields={data.formFields} onSave={onSave} />;
+      case 'access-control': return <AccessControlSection menuAccess={data.menuAccess} onSave={onSave} />;
+      default:               return null;
+    }
+  }
+
+  const visibleDomains = DOMAINS.filter((d) => !d.adminOnly || isAdmin);
+
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">Configure everything about your pharmacy — profile, taxes, alerts and more</p>
-      </div>
+      {/* Header / breadcrumb */}
+      {active ? (
+        <div className="space-y-2">
+          <button onClick={() => openSection(null)} className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> All settings
+          </button>
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <button onClick={() => openSection(null)} className="hover:text-foreground">Settings</button>
+            {DOMAIN_OF[active] && (<><ChevronRight className="h-3.5 w-3.5" /><span>{DOMAIN_OF[active]!.label}</span></>)}
+            <ChevronRight className="h-3.5 w-3.5" />
+            <span className="font-medium text-foreground">{SECTION_MAP[active]?.label}</span>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <p className="text-sm text-muted-foreground">Choose a configuration area to manage your pharmacy</p>
+        </div>
+      )}
 
       {isLoading ? (
-        <div className="grid grid-cols-[240px_1fr] gap-6">
-          <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-xl" />)}
+        active ? (
+          <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64 w-full rounded-xl" /></div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-52 w-full rounded-2xl" />)}
           </div>
-          <div className="space-y-4">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-64 w-full rounded-xl" />
-          </div>
+        )
+      ) : !data ? null : active ? (
+        /* ── Detail view ── */
+        <div className="rounded-2xl border border-border bg-card p-6 min-h-[500px]">
+          {renderSection(active)}
         </div>
-      ) : data ? (
-        <div className="grid grid-cols-[240px_1fr] gap-6 items-start">
-          {/* Left nav */}
-          <nav className="space-y-1 sticky top-6">
-            {SECTIONS.map((s) => {
-              const Icon = s.icon;
-              const isActive = activeSection === s.id;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setActiveSection(s.id)}
-                  className={cn(
-                    'w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-all',
-                    isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  )}
-                >
-                  <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', isActive ? 'bg-primary/20' : 'bg-muted')}>
-                    <Icon className={cn('h-4 w-4', isActive ? 'text-primary' : 'text-muted-foreground')} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold truncate">{s.label}</p>
-                    <p className="text-2xs truncate opacity-60">{s.description}</p>
-                  </div>
-                  {isActive && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                </button>
-              );
-            })}
-
-            {/* Admin quick-links */}
-            <div className="mt-4">
-              <p className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Administration</p>
-              {[
-                { href: '/users',  label: 'User Management',  icon: UserCog },
-                { href: '/roles',  label: 'Roles & Permissions', icon: Shield },
-                { href: '/audit',  label: 'Audit Log',        icon: ClipboardList },
-              ].map(({ href, label, icon: Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <span className="text-xs font-semibold flex-1">{label}</span>
-                  <ExternalLink className="h-3 w-3 opacity-40" />
-                </Link>
-              ))}
-            </div>
-
-            {/* Info box */}
-            <div className="mt-4 rounded-xl bg-muted/50 p-3">
-              <div className="flex items-start gap-2">
-                <Info className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                <p className="text-2xs text-muted-foreground leading-relaxed">Changes are saved per section. Your data is never shared.</p>
+      ) : (
+        /* ── Settings home: domain cards ── */
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visibleDomains.map((domain) => (
+            <div key={domain.id} className="flex flex-col rounded-2xl border border-border bg-card p-5 transition-shadow hover:shadow-sm">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted text-xl">{domain.emoji}</div>
+                <div className="min-w-0">
+                  <p className="font-bold leading-tight">{domain.label}</p>
+                  <p className="text-xs text-muted-foreground">{domain.description}</p>
+                </div>
+              </div>
+              <div className="mt-1 space-y-0.5">
+                {domain.sections.map((id) => {
+                  const s = SECTION_MAP[id]!;
+                  const Icon = s.icon;
+                  return (
+                    <button key={id} onClick={() => openSection(id)}
+                      className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-muted">
+                      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{s.label}</p>
+                        <p className="truncate text-2xs text-muted-foreground">{s.description}</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
+                    </button>
+                  );
+                })}
+                {domain.links?.filter((link) => !link.perm || permissions?.includes(link.perm)).map((link) => {
+                  const Icon = link.icon;
+                  return (
+                    <Link key={link.href} href={link.href}
+                      className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-muted">
+                      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate text-sm font-medium">{link.label}</span>
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
+                    </Link>
+                  );
+                })}
               </div>
             </div>
-          </nav>
-
-          {/* Content */}
-          <div className="rounded-2xl border border-border bg-card p-6 min-h-[500px]">
-            {activeSection === 'profile'        && <ProfileSection data={data} onSave={onSave} />}
-            {activeSection === 'tax'            && <TaxSection data={data} onSave={onSave} />}
-            {activeSection === 'import'         && <ImportSection />}
-            {activeSection === 'notifications'  && <NotificationsSection data={data} onSave={onSave} />}
-            {activeSection === 'templates'      && <TemplatesSection data={data} onSave={onSave} />}
-            {activeSection === 'system'         && <SystemSection data={data} onSave={onSave} />}
-            {activeSection === 'form-fields'    && <FormFieldsSection />}
-            {activeSection === 'access-control' && <AccessControlSection />}
-          </div>
+          ))}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

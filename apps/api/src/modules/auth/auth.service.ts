@@ -4,7 +4,15 @@ import { comparePassword, hashPassword, generateOtp } from '../../utils/password
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt';
 import { createAuditLog } from '../../utils/audit';
 import { sendOtpEmail } from '../../utils/mailer';
+import { resolveDropdowns } from '../../utils/dropdowns';
+import { resolveTemplates } from '../../utils/template';
+import { computeMenuHidden } from '../../utils/menu';
 import { v4 as uuidv4 } from 'uuid';
+
+// Form-field config is stored as an opaque per-tenant JSON map ({ formId: [...] }).
+function resolveFormFields(raw: unknown): Record<string, unknown> {
+  return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
+}
 import type {
   LoginInput,
   RefreshInput,
@@ -52,11 +60,29 @@ export async function login(
   ipAddress?: string,
   deviceInfo?: string,
 ) {
-  const user = await prisma.user.findFirst({
-    where: { email: input.email, deletedAt: null },
+  // Tenant resolution is SERVER-CONTROLLED. `email` is unique only per-tenant
+  // (schema: @@unique([tenantId, email])), so a bare email can match users in
+  // multiple tenants. An optional tenant identifier (tenant id OR slug) only
+  // NARROWS the candidate set — it can never grant access, because the password
+  // must still match the user in that tenant and the JWT's tenant is taken from
+  // the resolved user record, never from the client input.
+  const candidates = await prisma.user.findMany({
+    where: {
+      email: input.email,
+      deletedAt: null,
+      ...(input.tenantId
+        ? { OR: [{ tenantId: input.tenantId }, { tenant: { slug: input.tenantId } }] }
+        : {}),
+    },
     include: { tenant: true },
   });
 
+  if (candidates.length > 1) {
+    // Same email in multiple tenants and no tenant specified — refuse to guess.
+    throw new AppError('This email is registered with more than one pharmacy. Please specify your pharmacy to sign in.', 409);
+  }
+
+  const user = candidates[0];
   if (!user) {
     throw new AppError('Invalid email or password', 401);
   }
@@ -138,9 +164,11 @@ export async function login(
     },
   });
 
-  // Create session
+  // Create session — keyed by the access token's sessionId so it can be validated
+  // (and invalidated on logout / disable) on every authenticated request.
   await prisma.userSession.create({
     data: {
+      id: sessionId,
       tenantId: user.tenantId,
       userId: user.id,
       userName: user.name,
@@ -175,10 +203,18 @@ export async function login(
       tenantId: user.tenantId,
       tenantName: user.tenant.name,
       tenantSlug: user.tenant.slug,
+      logoUrl: user.tenant.logoUrl ?? undefined,
+      currency: user.tenant.currency ?? undefined,
+      dateFormat: user.tenant.dateFormat ?? undefined,
       supportContact: user.tenant.supportContact ?? undefined,
+      dropdownOptions: resolveDropdowns(user.tenant.dropdownOptions),
+      messageTemplates: resolveTemplates(user.tenant.messageTemplates),
+      menuHidden: computeMenuHidden(user.tenant.menuAccess, roles, permissions),
+      formFields: resolveFormFields(user.tenant.formFields),
       roles,
       permissions,
       mfaEnabled: user.mfaEnabled,
+      mustChangePassword: user.mustChangePassword,
       lastLoginAt: user.lastLoginAt?.toISOString(),
       passwordChangedAt: user.passwordChangedAt?.toISOString(),
     },
@@ -232,6 +268,12 @@ export async function refreshTokens(input: RefreshInput) {
   const sessionId = uuidv4();
   const { accessToken, roles, permissions } = await buildTokensForUser(user, sessionId);
 
+  // A refreshed access token gets its own active session row (same lifecycle as
+  // login) so the new token passes the per-request session check.
+  await prisma.userSession.create({
+    data: { id: sessionId, tenantId: user.tenantId, userId: user.id, userName: user.name, userRole: roles[0], isActive: true },
+  });
+
   // Rotate refresh token
   await prisma.refreshToken.update({ where: { id: storedToken.id }, data: { revokedAt: new Date() } });
 
@@ -255,7 +297,12 @@ export async function refreshTokens(input: RefreshInput) {
       tenantId: user.tenantId,
       tenantName: user.tenant.name,
       tenantSlug: user.tenant.slug,
+      logoUrl: user.tenant.logoUrl ?? undefined,
+      currency: user.tenant.currency ?? undefined,
+      dateFormat: user.tenant.dateFormat ?? undefined,
       supportContact: user.tenant.supportContact ?? undefined,
+      dropdownOptions: resolveDropdowns(user.tenant.dropdownOptions),
+      messageTemplates: resolveTemplates(user.tenant.messageTemplates),
       roles,
       permissions,
       mfaEnabled: user.mfaEnabled,
@@ -292,9 +339,18 @@ export async function getMe(userId: string) {
     tenantId: user.tenantId,
     tenantName: user.tenant.name,
     tenantSlug: user.tenant.slug,
+    logoUrl: user.tenant.logoUrl ?? undefined,
+    currency: user.tenant.currency ?? undefined,
+    dateFormat: user.tenant.dateFormat ?? undefined,
+    supportContact: user.tenant.supportContact ?? undefined,
+    dropdownOptions: resolveDropdowns(user.tenant.dropdownOptions),
+    messageTemplates: resolveTemplates(user.tenant.messageTemplates),
+    menuHidden: computeMenuHidden(user.tenant.menuAccess, roles, permissions),
+    formFields: resolveFormFields(user.tenant.formFields),
     roles,
     permissions,
     mfaEnabled: user.mfaEnabled,
+    mustChangePassword: user.mustChangePassword,
     lastLoginAt: user.lastLoginAt?.toISOString(),
     passwordChangedAt: user.passwordChangedAt?.toISOString(),
   };
@@ -384,6 +440,8 @@ export async function resetPassword(input: ResetPasswordInput): Promise<void> {
     }),
     prisma.otpCode.update({ where: { id: otpRecord.id }, data: { usedAt: new Date() } }),
     prisma.refreshToken.updateMany({ where: { userId: user.id }, data: { revokedAt: new Date() } }),
+    // Invalidate all active sessions — every existing access token is now dead.
+    prisma.userSession.updateMany({ where: { userId: user.id, isActive: true }, data: { isActive: false, logoutAt: new Date() } }),
   ]);
 
   await createAuditLog({
@@ -407,10 +465,12 @@ export async function changePassword(userId: string, tenantId: string, input: Ch
   const passwordHash = await hashPassword(input.newPassword);
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash, passwordChangedAt: new Date() },
+    data: { passwordHash, passwordChangedAt: new Date(), mustChangePassword: false },
   });
 
   await prisma.refreshToken.updateMany({ where: { userId }, data: { revokedAt: new Date() } });
+  // Invalidate all active sessions so every existing access token is rejected.
+  await prisma.userSession.updateMany({ where: { userId, isActive: true }, data: { isActive: false, logoutAt: new Date() } });
 
   await createAuditLog({
     tenantId,

@@ -4,74 +4,79 @@ import { prisma } from '../../config/database';
 import { sendSuccess, sendError, paginate } from '../../utils/response';
 import { AuthRequest } from '../../middleware/authenticate';
 import { NextFunction, Response } from 'express';
-import { TenantType, TenantPlan } from '@prisma/client';
+import { TenantStatus } from '@prisma/client';
+import * as tenantService from './tenant.service';
 
 const router = Router();
 router.use(authenticate);
 
-// A tenant may only ever see/modify its OWN organisation. Cross-tenant access
-// (listing or reading other pharmacies) is a platform-operator concern that does
-// not exist for regular tenant users — so every operation here is self-scoped.
+// A platform operator (has the platform:manage permission) can provision and
+// manage every tenant. Regular tenant users are strictly self-scoped.
+const isPlatform = (req: AuthRequest): boolean => {
+  const p = req.user!.permissions;
+  return p.includes('platform:manage') || p.includes('platform:*') || p.includes('*:*');
+};
+const actor = (req: AuthRequest): tenantService.Actor => ({ sub: req.user!.sub, name: req.user!.name, tenantId: req.user!.tenantId });
 
-router.get('/', requirePermission('settings', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+// List — platform sees all tenants; a regular user sees only their own.
+router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const own = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId } });
-    const list = own && !own.deletedAt ? [own] : [];
-    sendSuccess(res, paginate(list, list.length, 1, 50));
+    const list = await tenantService.listTenants(actor(req), isPlatform(req));
+    sendSuccess(res, paginate(list, list.length, 1, Math.max(list.length, 1)));
   } catch (err) { next(err); }
 });
 
-router.get('/:id', requirePermission('settings', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Provision a new pharmacy tenant (platform operator only). Idempotent.
+router.post('/', requirePermission('platform', 'manage'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.params['id'] !== req.user!.tenantId) { sendError(res, 'Not found', 404); return; }
-    const tenant = await prisma.tenant.findUnique({ where: { id: req.params['id'] } });
-    if (!tenant) { sendError(res, 'Not found', 404); return; }
-    sendSuccess(res, tenant);
+    const result = await tenantService.provisionTenant(req.body, actor(req));
+    sendSuccess(res, result, result.alreadyExisted ? 'Tenant already existed (no changes)' : 'Tenant provisioned', result.alreadyExisted ? 200 : 201);
   } catch (err) { next(err); }
 });
 
-// Creating a new tenant is platform onboarding. Until a dedicated platform-admin
-// role exists, it is gated behind settings:edit (Pharma Admin only).
-router.post('/', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await tenantService.getTenant(req.params['id']!, actor(req), isPlatform(req))); } catch (err) { next(err); }
+});
+
+// Tenant health & metadata (platform console).
+router.get('/:id/health', requirePermission('platform', 'manage'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await tenantService.getTenantHealth(req.params['id']!)); } catch (err) { next(err); }
+});
+
+// Lifecycle — activate / suspend / etc. (platform operator only).
+router.patch('/:id/status', requirePermission('platform', 'manage'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const body = req.body as Record<string, unknown>;
-    if (!body['name']) { sendError(res, 'Tenant name is required', 422); return; }
-    const tenant = await prisma.tenant.create({
-      data: {
-        name: body['name'] as string,
-        slug: (body['slug'] as string) ?? (body['name'] as string).toLowerCase().replace(/\s+/g, '-'),
-        type: (body['type'] as TenantType) ?? 'retail',
-        status: 'trial',
-        plan: (body['plan'] as TenantPlan) ?? 'starter',
-        phone: body['phone'] as string | undefined,
-        email: body['email'] as string | undefined,
-        addressLine1: body['addressLine1'] as string | undefined,
-        city: body['city'] as string | undefined,
-        state: body['state'] as string | undefined,
-        pincode: body['pincode'] as string | undefined,
-        licenseNumber: body['licenseNumber'] as string | undefined,
-        gstNumber: body['gstNumber'] as string | undefined,
-        drugLicenseNumber: body['drugLicenseNumber'] as string | undefined,
-      },
-    });
-    sendSuccess(res, tenant, 'Tenant created', 201);
+    const status = (req.body as { status?: string }).status as TenantStatus | undefined;
+    const valid: TenantStatus[] = ['active', 'suspended', 'pending_verification', 'trial', 'expired'];
+    if (!status || !valid.includes(status)) { sendError(res, `Invalid status. One of: ${valid.join(', ')}`, 422); return; }
+    sendSuccess(res, await tenantService.setTenantStatus(req.params['id']!, status, actor(req)), 'Tenant status updated');
   } catch (err) { next(err); }
 });
 
+// Reset the tenant owner's password (platform operator only).
+router.post('/:id/reset-admin', requirePermission('platform', 'manage'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await tenantService.resetTenantAdmin(req.params['id']!, actor(req)), 'Tenant admin reset — hand over the temporary password securely'); } catch (err) { next(err); }
+});
+
+// Self profile edit (a tenant editing its OWN organisation) — settings permission, self-scoped.
 router.patch('/:id', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (req.params['id'] !== req.user!.tenantId) { sendError(res, 'Not found', 404); return; }
-    const tenant = await prisma.tenant.update({ where: { id: req.params['id'] }, data: req.body });
+    // Whitelist self-editable profile fields — never let a tenant set its own
+    // status/plan/slug/deletedAt (those are platform-operator controlled).
+    const b = req.body as Record<string, unknown>;
+    const allowed = ['name', 'phone', 'email', 'addressLine1', 'addressLine2', 'city', 'state', 'pincode', 'country',
+      'gstNumber', 'drugLicenseNumber', 'licenseNumber', 'logoUrl', 'ownerName', 'mobile'] as const;
+    const data: Record<string, unknown> = {};
+    for (const k of allowed) if (b[k] !== undefined) data[k] = b[k];
+    const tenant = await prisma.tenant.update({ where: { id: req.params['id'] }, data });
     sendSuccess(res, tenant, 'Tenant updated');
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    if (req.params['id'] !== req.user!.tenantId) { sendError(res, 'Not found', 404); return; }
-    await prisma.tenant.update({ where: { id: req.params['id'] }, data: { deletedAt: new Date(), status: 'suspended' } });
-    sendSuccess(res, null, 'Tenant suspended');
-  } catch (err) { next(err); }
+// Deactivate (soft-delete) a tenant (platform operator only).
+router.delete('/:id', requirePermission('platform', 'manage'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await tenantService.deactivateTenant(req.params['id']!, actor(req)), 'Tenant deactivated'); } catch (err) { next(err); }
 });
 
 export default router;

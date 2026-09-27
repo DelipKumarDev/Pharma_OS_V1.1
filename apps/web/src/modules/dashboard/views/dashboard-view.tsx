@@ -2,12 +2,16 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   TrendingUp, TrendingDown, Receipt, Package, CalendarX2,
   Pill, AlertTriangle, ArrowRight, RefreshCw, FileText,
-  RotateCcw, Zap, Users, BarChart3,
+  RotateCcw, Zap, Users, BarChart3, IndianRupee, Calculator,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { OnboardingChecklist } from '@/modules/dashboard/components/onboarding-checklist';
 import {
   AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -17,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth-store';
 import { formatCurrency, formatNumber } from '@pharmaos/utils';
 import { formatDate } from '@pharmaos/utils';
 import { apiFetch } from '@/lib/api';
@@ -59,11 +64,36 @@ function greeting() {
 }
 
 export function DashboardView() {
-  const { data, isLoading, isError, refetch } = useQuery({
+  const router = useRouter();
+  const qc = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  const firstName = (user?.name ?? '').split(' ')[0] || 'there';
+  const pharmacyName = user?.tenantName ?? 'Your pharmacy';
+  const [showTopMeds, setShowTopMeds] = React.useState(false);
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['dashboard'],
     queryFn: fetchDashboard,
     refetchInterval: 5 * 60 * 1000,
   });
+
+  // TC_006/007/008/009 — function-key quick actions. F5 is intercepted so it
+  // navigates to Add Stock instead of triggering a browser refresh.
+  React.useEffect(() => {
+    const map: Record<string, string> = { F2: '/billing', F3: '/prescriptions', F5: '/stock', F6: '/returns' };
+    function onKey(e: KeyboardEvent) {
+      const href = map[e.key];
+      if (href) { e.preventDefault(); router.push(href); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [router]);
+
+  // TC_012 — Refresh pulls the latest data and confirms with a toast.
+  async function handleRefresh() {
+    await qc.invalidateQueries({ queryKey: ['dashboard'] });
+    await refetch();
+    toast.success('Dashboard refreshed');
+  }
 
   if (isError) {
     return (
@@ -80,21 +110,30 @@ export function DashboardView() {
   return (
     <div className="space-y-5">
 
+      {/* ── Onboarding checklist (hides once the store is set up) ── */}
+      <OnboardingChecklist />
+
       {/* ── Hero ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
-            {greeting()}, Rahul 👋
+            {greeting()}, {firstName} 👋
           </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {formatDate(new Date())} · Divya Pharmacy is open
+            {formatDate(new Date())} · {pharmacyName} is open
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}
-          className="shrink-0">
-          <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link href="/reports?tab=daily-close">
+            <Button size="sm" className="gap-1.5">
+              <Calculator className="h-4 w-4" /> Day Close
+            </Button>
+          </Link>
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isFetching}>
+            <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* ── Quick actions ── */}
@@ -164,7 +203,7 @@ export function DashboardView() {
           title="Today's Revenue"
           value={data ? formatCurrency(data.kpis.todayRevenue) : undefined}
           change={data?.kpis.todayRevenueChange}
-          icon={Receipt}
+          icon={IndianRupee}
           iconColor="text-emerald-600"
           iconBg="bg-emerald-50 dark:bg-emerald-900/25"
           loading={isLoading}
@@ -185,7 +224,7 @@ export function DashboardView() {
           iconColor="text-amber-600"
           iconBg="bg-amber-50 dark:bg-amber-900/25"
           alert={data?.kpis.lowStockItems ? 'Need reorder' : undefined}
-          alertHref="/stock?tab=reorder"
+          alertHref="/stock?tab=inventory&status=low_stock"
           loading={isLoading}
         />
         <KpiCard
@@ -195,7 +234,7 @@ export function DashboardView() {
           iconColor="text-red-600"
           iconBg="bg-red-50 dark:bg-red-900/25"
           alert={data?.kpis.expiringItems ? 'Take action' : undefined}
-          alertHref="/stock?tab=expiry"
+          alertHref="/expiry"
           loading={isLoading}
         />
       </div>
@@ -208,7 +247,7 @@ export function DashboardView() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-base">Revenue Trend</CardTitle>
-                <CardDescription>Last 30 days · daily revenue</CardDescription>
+                <CardDescription>Last 30 days · Daily revenue</CardDescription>
               </div>
               {data && (
                 <div className="text-right">
@@ -242,8 +281,14 @@ export function DashboardView() {
                   />
                   <YAxis
                     tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                    tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`}
-                    width={44}
+                    // Keep distinct tick values distinct: sub-₹1k shows the exact
+                    // rupee amount (₹400, ₹800) instead of everything rounding to
+                    // "₹0k"; ₹1k+ shows one decimal (₹1.2k) so 800 and 1200 differ.
+                    tickFormatter={(v: number) =>
+                      v >= 1000 ? `₹${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : `₹${Math.round(v)}`
+                    }
+                    allowDecimals={false}
+                    width={48}
                   />
                   <Tooltip
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', fontSize: '12px' }}
@@ -283,7 +328,7 @@ export function DashboardView() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-1.5">
-                  {data?.salesByCategory.slice(0, 5).map((item, i) => (
+                  {data?.salesByCategory.map((item, i) => (
                     <div key={item.category} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
@@ -308,11 +353,10 @@ export function DashboardView() {
               <CardTitle className="text-base">Top Medicines</CardTitle>
               <CardDescription>By quantity sold this month</CardDescription>
             </div>
-            <Link href="/stock?tab=catalog">
-              <Button variant="ghost" size="sm" className="gap-1 text-xs text-primary h-7">
-                View all <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
+            <Button variant="ghost" size="sm" className="gap-1 text-xs text-primary h-7"
+              onClick={() => setShowTopMeds(true)} disabled={!data?.topMedicines?.length}>
+              View List <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -369,14 +413,40 @@ export function DashboardView() {
         </Card>
       </div>
 
-      {/* ── Footer ── */}
-      <div className="flex items-center justify-center gap-3 py-1">
-        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
-        <p className="text-xs text-muted-foreground/60 tracking-wide" style={{ fontFamily: 'serif' }}>
-          ❁ सर्वे भवन्तु सुखिनः · सर्वे सन्तु निरामयाः ❁
-        </p>
-        <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
-      </div>
+      {/* ── Top Medicines detail dialog (TC_029) ── */}
+      <Dialog open={showTopMeds} onOpenChange={setShowTopMeds}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Top Selling Medicines</DialogTitle>
+            <DialogDescription>By quantity sold this month</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <th className="py-2 pr-2">#</th>
+                  <th className="py-2 pr-2">Medicine</th>
+                  <th className="py-2 pr-2 text-right">Units Sold</th>
+                  <th className="py-2 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.topMedicines.map((med, i) => (
+                  <tr key={med.name} className="border-b border-border/60 last:border-0">
+                    <td className="py-2 pr-2 text-muted-foreground">{i + 1}</td>
+                    <td className="py-2 pr-2 font-medium">{med.name}</td>
+                    <td className="py-2 pr-2 text-right tabular-nums">{formatNumber(med.qty)}</td>
+                    <td className="py-2 text-right font-semibold text-primary tabular-nums font-mono">{formatCurrency(med.revenue)}</td>
+                  </tr>
+                ))}
+                {!data?.topMedicines?.length && (
+                  <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">No sales recorded this month.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -400,7 +470,7 @@ function KpiCard({ title, value, change, icon: Icon, iconColor, iconBg, alert, a
       <CardContent className="pt-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{title}</p>
             {loading ? (
               <Skeleton className="mt-2 h-8 w-24" />
             ) : (
@@ -441,7 +511,7 @@ function AlertCard({ alert }: { alert: { id: string; type: string; message: stri
     critical: { color: 'border-destructive/40 bg-destructive/8', dot: 'bg-destructive animate-pulse', badge: 'destructive' as const },
   };
   const config = cfgMap[alert.severity] ?? cfgMap.warning;
-  const href = alert.type === 'expiry' ? '/stock?tab=expiry' : alert.type === 'stock' ? '/stock?tab=reorder' : '/settings';
+  const href = alert.type === 'expiry' ? '/expiry' : alert.type === 'stock' ? '/stock?tab=inventory&status=low_stock' : '/settings';
   return (
     <Link href={href}>
       <div className={cn('flex items-start gap-3 rounded-xl border p-3 transition-all hover:opacity-80 cursor-pointer', config.color)}>

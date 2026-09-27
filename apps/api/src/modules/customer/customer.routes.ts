@@ -10,5 +10,6 @@ router.get('/:id', requirePermission('customers', 'view'), customerController.ge
 router.post('/', requirePermission('customers', 'create'), customerController.create);
 router.patch('/:id', requirePermission('customers', 'edit'), customerController.update);
 router.get('/:id/purchases', requirePermission('customers', 'view'), customerController.getPurchases);
+router.post('/:id/payments', requirePermission('customers', 'edit'), customerController.recordPayment);
 
 export default router;

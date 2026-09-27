@@ -12,7 +12,7 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('[PharmaOS] Page error:', error);
+    console.error('[Pharma Ist] Page error:', error);
   }, [error]);
 
   return (

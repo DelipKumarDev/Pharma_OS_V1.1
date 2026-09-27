@@ -6,7 +6,7 @@ import { type ColumnDef } from '@tanstack/react-table';
 import {
   Search, Plus, Minus, Trash2, Receipt, History, X, Loader2,
   User, Printer, Clock, CheckCircle, MoreHorizontal, Eye,
-  Download, Package, Scan, Tag, MessageCircle, QrCode,
+  Download, Package, Scan, Tag, MessageCircle, QrCode, PackagePlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Medicine, Bill } from '@pharmaos/types';
@@ -21,20 +21,68 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth-store';
 import { apiFetch } from '@/lib/api';
+import { isOnline, getCatalog, cacheCatalog, enqueueOp } from '@/lib/offline';
+import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+// Receipt/print config — mirrors the server default so a missing/partial config
+// still renders a clean, compliant receipt.
+type PaperSize = 'thermal80' | 'thermal58' | 'a5' | 'a4';
+type ReceiptConfig = {
+  paperSize: PaperSize;
+  showDoctor: boolean; showBatch: boolean; showExpiry: boolean; showHsn: boolean;
+  showGstBreakdown: boolean; showSavings: boolean; showCashier: boolean;
+  showPhone: boolean; showAddress: boolean; showGstin: boolean; showDrugLicense: boolean;
+  showLicense: boolean; showPoweredBy: boolean; showQr: boolean; compact: boolean;
+};
+const RECEIPT_DEFAULTS: ReceiptConfig = {
+  paperSize: 'thermal80',
+  showDoctor: true, showBatch: true, showExpiry: true, showHsn: false,
+  showGstBreakdown: true, showSavings: true, showCashier: true,
+  showPhone: true, showAddress: true, showGstin: true, showDrugLicense: true,
+  showLicense: false, showPoweredBy: true, showQr: false, compact: false,
+};
+
+// Pharmacy identity printed on the bill (pulled live from the tenant profile).
+interface PharmacyInfo {
+  name?: string; phone?: string; email?: string;
+  address?: string; city?: string; state?: string; pincode?: string;
+  gstin?: string; drugLicense?: string; license?: string; upiId?: string; logo?: string;
+}
+
+// Build the QR payload for a bill: a real, scannable UPI intent string when the
+// pharmacy has a UPI ID configured (so the customer can actually pay), else a
+// plain bill reference. Used by both the receipt QR and the checkout QR.
+function upiPayString(ph: PharmacyInfo, billNo: string, amount: number): string {
+  if (ph.upiId) {
+    return `upi://pay?pa=${encodeURIComponent(ph.upiId)}&pn=${encodeURIComponent(ph.name || 'Pharmacy')}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Bill ' + billNo)}`;
+  }
+  return `${ph.name || 'Pharma Ist'}|${billNo}|INR${amount.toFixed(2)}`;
+}
+// Tax & Billing settings that affect what the printed bill shows (distinct from
+// receiptConfig): GST display on/off, generic-name printing, and the custom
+// thank-you / terms text — all configured in Settings → Tax & Billing.
+interface BillingPrintOpts { showGst?: boolean; showGenericName?: boolean; thankYouMessage?: string; terms?: string; }
+interface ReceiptOpts { pharmacy?: PharmacyInfo; phone?: string; cashier?: string; qrDataUrl?: string; config?: Partial<ReceiptConfig>; billing?: BillingPrintOpts; }
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface CartItem {
   medicineId: string;
+  inventoryItemId: string;
   medicineName: string;
   genericName: string;
   batchNumber: string;
   expiryDate: string;
   quantity: number;
+  saleUnit: 'pack' | 'unit';     // sold by strip/pack, or as loose tablets/capsules
+  unitsPerPack: number;
+  packSellingPrice: number;      // base strip price (for switching pack ⇄ unit)
+  packMrp: number;
+  availableUnits: number;        // total loose units sellable from the resolved batch
   mrp: number;
   sellingPrice: number;
   discount: number;
@@ -70,78 +118,22 @@ const DEMO_BARCODES = [
 // ─── UPI QR Code component ───────────────────────────────────────────────────
 
 function UPIQRCode({ data, size = 130 }: { data: string; size?: number }) {
-  const N = 21;
-  // Finder pattern (7×7): outer ring, white ring, center 3×3
-  const FP = [
-    [1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,1],
-    [1,0,1,1,1,0,1],
-    [1,0,1,1,1,0,1],
-    [1,0,1,1,1,0,1],
-    [1,0,0,0,0,0,1],
-    [1,1,1,1,1,1,1],
-  ] as const;
-
-  type Cell = boolean | undefined;
-  const grid: Cell[][] = Array.from({ length: N }, () => Array(N).fill(undefined) as Cell[]);
-
-  function placeFP(sr: number, sc: number) {
-    for (let r = 0; r < 7; r++)
-      for (let c = 0; c < 7; c++)
-        grid[sr + r]![sc + c] = FP[r]![c] === 1;
-    // White separator strip
-    for (let i = -1; i <= 7; i++) {
-      if (sr + i >= 0 && sr + i < N) {
-        if (sc - 1 >= 0) grid[sr + i]![sc - 1] = false;
-        if (sc + 7 < N)  grid[sr + i]![sc + 7] = false;
-      }
-      if (sc + i >= 0 && sc + i < N) {
-        if (sr - 1 >= 0) grid[sr - 1]![sc + i] = false;
-        if (sr + 7 < N)  grid[sr + 7]![sc + i] = false;
-      }
-    }
+  // Renders a REAL, scannable QR (via the qrcode lib) from the UPI intent
+  // string — the previous hand-drawn pseudo-random grid was not scannable.
+  const [src, setSrc] = React.useState<string>('');
+  React.useEffect(() => {
+    let alive = true;
+    if (!data) { setSrc(''); return; }
+    QRCode.toDataURL(data, { margin: 1, width: Math.max(size * 2, 240), errorCorrectionLevel: 'M' })
+      .then((url) => { if (alive) setSrc(url); })
+      .catch(() => { if (alive) setSrc(''); });
+    return () => { alive = false; };
+  }, [data, size]);
+  if (!src) {
+    return <div style={{ width: size, height: size }} className="flex items-center justify-center rounded bg-muted text-[9px] text-muted-foreground">QR</div>;
   }
-
-  placeFP(0, 0);   // top-left
-  placeFP(0, 14);  // top-right
-  placeFP(14, 0);  // bottom-left
-
-  // Timing patterns on row 6 and col 6
-  for (let i = 8; i <= 12; i++) {
-    grid[6]![i] = i % 2 === 0;
-    grid[i]![6] = i % 2 === 0;
-  }
-
-  // Seeded pseudo-random for data modules
-  let seed = Array.from(data).reduce((h, c) => ((h * 31 + c.charCodeAt(0)) | 0), 0x7FABCD12);
-  function nextBool(): boolean {
-    seed = (seed * 1664525 + 1013904223) | 0;
-    const u = (seed >>> 0) / 0xFFFFFFFF;
-    return u > 0.46;
-  }
-
-  for (let r = 0; r < N; r++)
-    for (let c = 0; c < N; c++)
-      if (grid[r]![c] === undefined)
-        grid[r]![c] = nextBool();
-
-  return (
-    <svg
-      viewBox={`-2 -2 ${N + 4} ${N + 4}`}
-      width={size} height={size}
-      xmlns="http://www.w3.org/2000/svg"
-      style={{ display: 'block', imageRendering: 'pixelated' }}
-    >
-      <rect x={-2} y={-2} width={N + 4} height={N + 4} fill="white" />
-      {(grid as boolean[][]).map((row, r) =>
-        row.map((dark, c) =>
-          dark ? (
-            <rect key={`${r},${c}`} x={c} y={r} width={0.92} height={0.92} rx={0.08} fill="#111827" />
-          ) : null
-        )
-      )}
-    </svg>
-  );
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="Scan to pay (UPI)" width={size} height={size} style={{ display: 'block' }} />;
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -167,80 +159,310 @@ function expiryAlert(exp: string): string | null {
   return null;
 }
 
-// 80mm thermal receipt (72mm printable width). Works with thermal printer
-// Windows drivers (Epson TM series, etc.) as well as A4 printers.
-function printReceipt(bill: Bill, total: number, payMethod: string, pharmacyName = 'Pharmacy') {
-  // GST rate-wise breakup (statutory requirement on tax invoices)
-  const gstBreakup = new Map<number, { taxable: number; gst: number }>();
-  for (const i of bill.items) {
-    const rate = i.gstRate ?? 0;
-    const e = gstBreakup.get(rate) ?? { taxable: 0, gst: 0 };
-    e.taxable += i.totalAmount - (i.gstAmount ?? 0);
-    e.gst += i.gstAmount ?? 0;
-    gstBreakup.set(rate, e);
-  }
-  const gstRows = Array.from(gstBreakup.entries())
-    .filter(([rate]) => rate > 0)
-    .sort(([a], [b]) => a - b)
-    .map(([rate, v]) =>
-      `<tr><td>GST ${rate}% (CGST ${rate / 2}% + SGST ${rate / 2}%)</td><td class="r">₹${v.gst.toFixed(2)}</td></tr>`)
-    .join('');
+// Minimal HTML escape for values interpolated into the printed document.
+function esc(s?: string | null): string {
+  return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+}
 
+// Geometry per paper size. Thermal → roll printer (80mm/58mm). A5/A4 → a full
+// tax-invoice page. `mono` keeps the classic thermal monospace look; page sizes
+// use a proportional font and a bordered invoice layout.
+const PAPER_GEO: Record<PaperSize, { page: string; width: string; font: string; mono: boolean; win: [number, number] }> = {
+  thermal80: { page: '80mm auto', width: '72mm', font: '10.5px', mono: true, win: [360, 640] },
+  thermal58: { page: '58mm auto', width: '50mm', font: '9px', mono: true, win: [300, 640] },
+  a5:        { page: 'A5',        width: '100%', font: '11px', mono: false, win: [640, 800] },
+  a4:        { page: 'A4',        width: '100%', font: '12px', mono: false, win: [820, 900] },
+};
+
+// Render + open the print window for a bill in whichever paper format the tenant
+// configured. Thermal sizes reuse the compact roll layout; A5/A4 render a full
+// GST tax invoice. Pharmacy identity (address / GSTIN / drug licence) is included
+// per the receipt config.
+function printReceipt(bill: Bill, total: number, payMethod: string, opts: ReceiptOpts = {}) {
+  const cfg = { ...RECEIPT_DEFAULTS, ...(opts.config ?? {}) };
+  const geo = PAPER_GEO[cfg.paperSize] ?? PAPER_GEO.thermal80;
+  const isThermal = cfg.paperSize === 'thermal80' || cfg.paperSize === 'thermal58';
+  const compact = cfg.compact || cfg.paperSize === 'thermal58';
+  const ph: PharmacyInfo = { ...(opts.pharmacy ?? {}), phone: opts.pharmacy?.phone ?? opts.phone };
+  const pharmacyName = ph.name || 'Pharmacy';
+  // Tax & Billing toggles (default: show GST, hide generic name, standard thanks).
+  const showGst = opts.billing?.showGst !== false;
+  const showGenericName = opts.billing?.showGenericName === true;
+  const thankYou = (opts.billing?.thankYouMessage || '').trim() || 'Thank you for your purchase! Visit again.';
+  const terms = (opts.billing?.terms || '').trim();
+
+  const totalGst = bill.items.reduce((s, i) => s + (i.gstAmount ?? 0), 0);
+  const gstBreakup = new Map<number, number>();
+  for (const i of bill.items) gstBreakup.set(i.gstRate ?? 0, (gstBreakup.get(i.gstRate ?? 0) ?? 0) + (i.gstAmount ?? 0));
+  const gstRows = Array.from(gstBreakup.entries()).filter(([r]) => r > 0).sort(([a], [b]) => a - b);
+  const savings = bill.items.reduce((s, i) => s + ((i.mrp ?? i.sellingPrice) * i.quantity), 0) - total;
   const hasScheduled = bill.items.some((i) => {
     const s = (i as { schedule?: string | null }).schedule;
     return s && SCHEDULED_DRUGS.includes(s);
   });
+  const custName = (bill as { customerName?: string }).customerName ?? bill.customer?.name;
+  const custPhone = (bill as { customerPhone?: string }).customerPhone ?? bill.customer?.phone;
+  const doctor = (bill as { doctor?: string }).doctor;
+  const totalQty = bill.items.reduce((s, i) => s + i.quantity, 0);
 
-  const content = `<html><head><title>Bill ${bill.billNumber}</title>
+  // ── Shared pharmacy identity lines (address, contact, statutory licences) ──
+  const addressLine = [ph.address, [ph.city, ph.state].filter(Boolean).join(', '), ph.pincode].filter(Boolean).join(', ');
+  const identityLines: string[] = [];
+  if (cfg.showAddress && addressLine) identityLines.push(esc(addressLine));
+  const contactBits: string[] = [];
+  if (cfg.showPhone && ph.phone) contactBits.push(`Ph: ${esc(ph.phone)}`);
+  if (!isThermal && ph.email) contactBits.push(esc(ph.email));
+  if (contactBits.length) identityLines.push(contactBits.join('  •  '));
+  const licenceBits: string[] = [];
+  if (cfg.showGstin && ph.gstin) licenceBits.push(`GSTIN: ${esc(ph.gstin)}`);
+  if (cfg.showDrugLicense && ph.drugLicense) licenceBits.push(`D.L. No: ${esc(ph.drugLicense)}`);
+  if (cfg.showLicense && ph.license) licenceBits.push(`Licence: ${esc(ph.license)}`);
+  const licenceLine = licenceBits.join('  •  ');
+
+  const scheduledNote = 'Schedule H/H1 drug — to be sold by retail on the prescription of a Registered Medical Practitioner only.';
+
+  let content: string;
+
+  if (isThermal) {
+    // ── Roll printer layout (80mm / 58mm) ──
+    const itemMeta = (i: Bill['items'][number]) => [
+      cfg.showBatch ? `B:${esc(i.batchNumber)}` : '',
+      cfg.showExpiry ? `E:${new Date(i.expiryDate).toLocaleDateString('en-IN', { month: '2-digit', year: '2-digit' })}` : '',
+      i.discount ? `D:${i.discount}%` : '',
+    ].filter(Boolean).join(' ');
+    const gstSection = !showGst ? ''
+      : (cfg.showGstBreakdown && !compact)
+      ? gstRows.map(([rate, gst]) => `<tr><td>GST ${rate}% (C ${rate / 2} + S ${rate / 2})</td><td class="r">₹${gst.toFixed(2)}</td></tr>`).join('')
+      : (totalGst > 0 ? `<tr><td>GST</td><td class="r">₹${totalGst.toFixed(2)}</td></tr>` : '');
+
+    content = `<html><head><title>Bill ${esc(bill.billNumber)}</title>
 <style>
-  @page { size: 80mm auto; margin: 0; }
-  @media print { body { width: 72mm; } }
+  @page { size: ${geo.page}; margin: 0; }
+  @media print { body { width: ${geo.width}; } }
   * { box-sizing: border-box; }
-  body { font-family: 'Courier New', monospace; font-size: 10.5px; width: 72mm;
-         margin: 0 auto; padding: 4mm 2mm; color: #000; }
+  body { font-family: 'Courier New', monospace; font-size: ${geo.font}; width: ${geo.width};
+         margin: 0 auto; padding: ${compact ? '2mm 1.5mm' : '4mm 2mm'}; color: #000; }
   h2 { font-size: 13px; margin: 0; text-align: center; }
-  .sub { text-align: center; font-size: 9px; margin: 1px 0; }
-  p { margin: 2px 0; }
+  .sub { text-align: center; font-size: 8.5px; margin: 1px 0; line-height: 1.25; }
+  p { margin: ${compact ? '1px 0' : '2px 0'}; }
   table { width: 100%; border-collapse: collapse; }
-  td { padding: 1.5px 0; vertical-align: top; font-size: 10.5px; }
+  td { padding: 1.5px 0; vertical-align: top; font-size: ${geo.font}; }
   .r { text-align: right; white-space: nowrap; }
   .c { text-align: center; }
   .tot td { border-top: 1px solid #000; font-weight: bold; font-size: 12px; padding-top: 3px; }
-  hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
-  .small { font-size: 9px; }
-  .warn { font-size: 9px; border: 1px solid #000; padding: 2px 4px; margin: 4px 0; text-align: center; }
+  hr { border: 0; border-top: 1px dashed #000; margin: ${compact ? '2px 0' : '4px 0'}; }
+  .small { font-size: 8.5px; }
+  .warn { font-size: 8.5px; border: 1px solid #000; padding: 2px 4px; margin: 4px 0; text-align: center; }
 </style></head><body>
-<h2>${pharmacyName.toUpperCase()}</h2>
-<p class="sub">TAX INVOICE</p>
+${ph.logo ? `<p class="c" style="margin:0 0 2px"><img src="${ph.logo}" style="max-height:14mm;max-width:40mm;object-fit:contain"/></p>` : ''}
+<h2>${esc(pharmacyName.toUpperCase())}</h2>
+${identityLines.map((l) => `<p class="sub">${l}</p>`).join('')}
+${licenceLine ? `<p class="sub">${licenceLine}</p>` : ''}
+<p class="sub"><b>TAX INVOICE</b></p>
 <hr/>
-<p>Bill: <b>${bill.billNumber}</b></p>
+<p>Bill: <b>${esc(bill.billNumber)}</b></p>
 <p>Date: ${formatDateTime(bill.createdAt)}</p>
-<p>Patient: ${bill.customer?.name ?? 'Walk-in Customer'}${bill.customer?.phone ? `<br/>Ph: ${bill.customer.phone}` : ''}</p>
-${(bill as { doctor?: string }).doctor ? `<p>Rx by: Dr. ${(bill as { doctor?: string }).doctor}</p>` : ''}
+<p>${custName ? `Customer: ${esc(custName)}` : 'Walk-in Customer'}${custPhone ? `<br/>Ph: ${esc(custPhone)}` : ''}</p>
+${cfg.showDoctor && doctor ? `<p>Rx by: Dr. ${esc(doctor)}</p>` : ''}
+${cfg.showCashier && opts.cashier ? `<p>Cashier: ${esc(opts.cashier)}</p>` : ''}
 <hr/>
 <table>
 <tr><td><b>Item</b></td><td class="r"><b>Qty</b></td><td class="r"><b>Rate</b></td><td class="r"><b>Amt</b></td></tr>
-${bill.items.map((i) => `
-<tr><td colspan="4" style="padding-bottom:0">${i.medicineName}</td></tr>
-<tr><td class="small">B:${i.batchNumber} E:${new Date(i.expiryDate).toLocaleDateString('en-IN', { month: '2-digit', year: '2-digit' })}${i.discount ? ` D:${i.discount}%` : ''}</td>
-<td class="r">${i.quantity}</td><td class="r">${i.sellingPrice.toFixed(2)}</td><td class="r">${i.totalAmount.toFixed(2)}</td></tr>`).join('')}
+${bill.items.map((i) => { const meta = itemMeta(i); const gen = showGenericName && (i as { genericName?: string }).genericName; return `
+<tr><td colspan="4" style="padding-bottom:0">${esc(i.medicineName)}${gen ? `<br/><span class="small" style="font-style:italic">${esc((i as { genericName?: string }).genericName)}</span>` : ''}</td></tr>
+<tr><td class="small">${meta}</td>
+<td class="r">${i.quantity}</td><td class="r">${i.sellingPrice.toFixed(2)}</td><td class="r">${i.totalAmount.toFixed(2)}</td></tr>`; }).join('')}
 </table>
 <hr/>
 <table>
 <tr><td>Subtotal</td><td class="r">₹${bill.subtotal.toFixed(2)}</td></tr>
 ${bill.discountAmount > 0 ? `<tr><td>Discount (${bill.discountPercent}%)</td><td class="r">-₹${bill.discountAmount.toFixed(2)}</td></tr>` : ''}
-${gstRows}
+${gstSection}
 <tr class="tot"><td>TOTAL</td><td class="r">₹${total.toFixed(2)}</td></tr>
-<tr><td>Paid (${payMethod.toUpperCase()})</td><td class="r">₹${bill.paidAmount.toFixed(2)}</td></tr>
+<tr><td>Paid (${esc(payMethod.toUpperCase())})</td><td class="r">₹${bill.paidAmount.toFixed(2)}</td></tr>
 ${bill.balanceAmount > 0 ? `<tr><td><b>Balance Due</b></td><td class="r"><b>₹${bill.balanceAmount.toFixed(2)}</b></td></tr>` : ''}
 </table>
-${hasScheduled ? '<div class="warn">Schedule H/H1 drug — to be sold on prescription of a Registered Medical Practitioner only</div>' : ''}
+${cfg.showSavings && savings > 0.005 ? `<p class="c small">You saved ₹${savings.toFixed(2)}</p>` : ''}
+${hasScheduled ? `<div class="warn">${scheduledNote}</div>` : ''}
+${cfg.showQr && opts.qrDataUrl ? `<p class="c"><img src="${opts.qrDataUrl}" style="width:34mm;height:34mm"/></p>` : ''}
 <hr/>
-<p class="c small">Items: ${bill.items.length} · Qty: ${bill.items.reduce((s, i) => s + i.quantity, 0)}</p>
-<p class="c small">Thank you for your purchase!<br/>Get well soon. Visit again.</p>
+${compact ? '' : `<p class="c small">Items: ${bill.items.length} · Qty: ${totalQty}</p>`}
+${terms ? `<p class="c small">${esc(terms)}</p>` : ''}
+<p class="c small">${esc(thankYou)}</p>
+${cfg.showPoweredBy ? '<p class="c small">Powered by Pharma Ist</p>' : ''}
+<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},150);};</script>
 </body></html>`;
-  const w = window.open('', '_blank', 'width=340,height=600');
-  if (w) { w.document.write(content); w.document.close(); w.print(); }
+  } else {
+    // ── A5 / A4 full GST tax-invoice layout ──
+    const cols: Array<{ h: string; cls?: string }> = [{ h: '#' }, { h: 'Particulars' }];
+    if (cfg.showBatch) cols.push({ h: 'Batch' });
+    if (cfg.showExpiry) cols.push({ h: 'Exp' });
+    if (cfg.showHsn) cols.push({ h: 'HSN' });
+    cols.push({ h: 'Qty', cls: 'r' }, { h: 'Rate', cls: 'r' });
+    if (showGst) cols.push({ h: 'GST%', cls: 'r' });
+    cols.push({ h: 'Amount', cls: 'r' });
+
+    const rows = bill.items.map((i, idx) => {
+      const gen = showGenericName && (i as { genericName?: string }).genericName;
+      const cells = [`<td>${idx + 1}</td>`, `<td>${esc(i.medicineName)}${gen ? `<br/><span class="mut" style="font-style:italic">${esc((i as { genericName?: string }).genericName)}</span>` : ''}${i.discount ? ` <span class="mut">(−${i.discount}%)</span>` : ''}</td>`];
+      if (cfg.showBatch) cells.push(`<td>${esc(i.batchNumber)}</td>`);
+      if (cfg.showExpiry) cells.push(`<td>${new Date(i.expiryDate).toLocaleDateString('en-IN', { month: '2-digit', year: '2-digit' })}</td>`);
+      if (cfg.showHsn) cells.push(`<td>${esc((i as { hsn?: string }).hsn ?? '')}</td>`);
+      cells.push(`<td class="r">${i.quantity}</td>`, `<td class="r">${i.sellingPrice.toFixed(2)}</td>`);
+      if (showGst) cells.push(`<td class="r">${i.gstRate ?? 0}%</td>`);
+      cells.push(`<td class="r">${i.totalAmount.toFixed(2)}</td>`);
+      return `<tr>${cells.join('')}</tr>`;
+    }).join('');
+
+    const gstSummary = !showGst ? ''
+      : (cfg.showGstBreakdown && gstRows.length)
+      ? gstRows.map(([rate, gst]) => `<tr><td>GST ${rate}% (CGST ${rate / 2}% + SGST ${rate / 2}%)</td><td class="r">₹${gst.toFixed(2)}</td></tr>`).join('')
+      : (totalGst > 0 ? `<tr><td>GST</td><td class="r">₹${totalGst.toFixed(2)}</td></tr>` : '');
+
+    content = `<html><head><title>Invoice ${esc(bill.billNumber)}</title>
+<style>
+  @page { size: ${geo.page}; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: ${geo.font}; color: #111; margin: 0; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid #111; padding-bottom: 8px; }
+  .ph-name { font-size: ${cfg.paperSize === 'a4' ? '20px' : '16px'}; font-weight: 800; letter-spacing: .3px; }
+  .ph-lines { font-size: ${cfg.paperSize === 'a4' ? '11px' : '10px'}; color: #333; line-height: 1.5; margin-top: 2px; }
+  .doc-title { text-align: right; }
+  .doc-title h1 { font-size: 16px; margin: 0; letter-spacing: 2px; }
+  .meta { font-size: 11px; color: #333; margin-top: 4px; line-height: 1.6; }
+  .parties { display: flex; justify-content: space-between; gap: 16px; margin: 10px 0; font-size: 11px; }
+  .parties .box { border: 1px solid #ccc; border-radius: 6px; padding: 6px 10px; flex: 1; }
+  .parties .label { font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: #777; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  table.items th { background: #f3f4f6; text-align: left; padding: 6px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .3px; border-bottom: 1px solid #d1d5db; }
+  table.items td { padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 11px; vertical-align: top; }
+  table.items .r, th.r { text-align: right; }
+  .mut { color: #999; font-size: 9px; }
+  .foot { display: flex; justify-content: space-between; gap: 24px; margin-top: 10px; }
+  .totals { margin-left: auto; min-width: 240px; }
+  .totals table { width: 100%; border-collapse: collapse; }
+  .totals td { padding: 3px 0; font-size: 11px; }
+  .totals .r { text-align: right; }
+  .totals .grand td { border-top: 2px solid #111; font-weight: 800; font-size: 14px; padding-top: 6px; }
+  .warn { border: 1px solid #b45309; background: #fffbeb; color: #92400e; padding: 6px 10px; border-radius: 6px; font-size: 10px; margin-top: 10px; }
+  .thanks { text-align: center; font-size: 10px; color: #666; margin-top: 14px; border-top: 1px dashed #ccc; padding-top: 8px; }
+  .sign { text-align: right; font-size: 11px; margin-top: 28px; }
+</style></head><body>
+<div class="head">
+  <div style="display:flex;gap:12px;align-items:flex-start">
+    ${ph.logo ? `<img src="${ph.logo}" style="max-height:20mm;max-width:30mm;object-fit:contain"/>` : ''}
+    <div>
+      <div class="ph-name">${esc(pharmacyName)}</div>
+      <div class="ph-lines">
+        ${identityLines.join('<br/>')}
+        ${licenceLine ? `<br/><b>${licenceLine}</b>` : ''}
+      </div>
+    </div>
+  </div>
+  <div class="doc-title">
+    <h1>TAX INVOICE</h1>
+    <div class="meta">
+      <b>${esc(bill.billNumber)}</b><br/>
+      ${formatDateTime(bill.createdAt)}
+      ${cfg.showCashier && opts.cashier ? `<br/>Billed by: ${esc(opts.cashier)}` : ''}
+    </div>
+  </div>
+</div>
+
+<div class="parties">
+  <div class="box">
+    <div class="label">Billed To</div>
+    ${custName ? `<b>${esc(custName)}</b>` : 'Walk-in Customer'}${custPhone ? `<br/>Ph: ${esc(custPhone)}` : ''}
+    ${cfg.showDoctor && doctor ? `<br/>Rx by: Dr. ${esc(doctor)}` : ''}
+  </div>
+  <div class="box">
+    <div class="label">Payment</div>
+    Mode: <b>${esc(payMethod.toUpperCase())}</b><br/>
+    Paid: ₹${bill.paidAmount.toFixed(2)}${bill.balanceAmount > 0 ? `<br/><b>Balance Due: ₹${bill.balanceAmount.toFixed(2)}</b>` : ''}
+  </div>
+</div>
+
+<table class="items">
+  <thead><tr>${cols.map((c) => `<th class="${c.cls ?? ''}">${c.h}</th>`).join('')}</tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+
+<div class="foot">
+  <div style="font-size:10px;color:#555;max-width:50%">
+    ${cfg.showSavings && savings > 0.005 ? `<p><b>You saved ₹${savings.toFixed(2)}</b> vs MRP.</p>` : ''}
+    <p>Items: ${bill.items.length} &nbsp;·&nbsp; Total Qty: ${totalQty}</p>
+    ${cfg.showQr && opts.qrDataUrl ? `<img src="${opts.qrDataUrl}" style="width:28mm;height:28mm"/>` : ''}
+  </div>
+  <div class="totals">
+    <table>
+      <tr><td>Subtotal</td><td class="r">₹${bill.subtotal.toFixed(2)}</td></tr>
+      ${bill.discountAmount > 0 ? `<tr><td>Discount (${bill.discountPercent}%)</td><td class="r">−₹${bill.discountAmount.toFixed(2)}</td></tr>` : ''}
+      ${gstSummary}
+      <tr class="grand"><td>TOTAL</td><td class="r">₹${total.toFixed(2)}</td></tr>
+    </table>
+    <div class="sign">For ${esc(pharmacyName)}<br/><br/>Authorised Signatory</div>
+  </div>
+</div>
+
+${hasScheduled ? `<div class="warn">${scheduledNote}</div>` : ''}
+${terms ? `<div class="thanks" style="border:0;padding-top:6px">${esc(terms)}</div>` : ''}
+<div class="thanks">
+  ${esc(thankYou)}
+  ${cfg.showPoweredBy ? '<br/>Powered by Pharma Ist' : ''}
+</div>
+<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},200);};</script>
+</body></html>`;
+  }
+
+  const w = window.open('', '_blank', `width=${geo.win[0]},height=${geo.win[1]}`);
+  if (!w) {
+    toast.error('Pop-up blocked — allow pop-ups for this site to print receipts');
+    return;
+  }
+  // Printing waits for the document's onload (script above) so the full receipt
+  // is laid out before the print dialog opens (TC_027).
+  w.document.write(content);
+  w.document.close();
+}
+
+// Fetch the tenant's receipt config + pharmacy profile, generate the QR if
+// enabled, then print in the configured paper format. Reads settings fresh so
+// config changes apply without a reload; offline it falls back to clean defaults.
+async function printBill(bill: Bill, total: number, payMethod: string, meta: { pharmacyName?: string; cashier?: string }) {
+  let config: Partial<ReceiptConfig> = {};
+  const pharmacy: PharmacyInfo = { name: meta.pharmacyName };
+  const billingOpts: BillingPrintOpts = {};
+  if (isOnline()) {
+    try {
+      const r = await apiFetch('/api/settings');
+      const j = await r.json() as { data?: { receipt?: Partial<ReceiptConfig>; profile?: Record<string, string | null>; billing?: Record<string, unknown> } };
+      config = j.data?.receipt ?? {};
+      const p = j.data?.profile ?? {};
+      pharmacy.name = p['pharmacyName'] || meta.pharmacyName || pharmacy.name;
+      pharmacy.phone = p['mobile'] || p['phone'] || undefined;
+      pharmacy.email = p['email'] || undefined;
+      pharmacy.address = p['address'] || undefined;
+      pharmacy.city = p['city'] || undefined;
+      pharmacy.state = p['state'] || undefined;
+      pharmacy.pincode = p['pincode'] || undefined;
+      pharmacy.gstin = p['gstNumber'] || undefined;
+      pharmacy.drugLicense = p['drugLicenseNumber'] || undefined;
+      pharmacy.license = p['licenseNumber'] || undefined;
+      pharmacy.logo = (typeof p['logoUrl'] === 'string' && p['logoUrl']) ? p['logoUrl'] as string : undefined;
+      // Tax & Billing settings that shape the printed bill.
+      const b = j.data?.billing ?? {};
+      pharmacy.upiId = typeof b['upiId'] === 'string' && b['upiId'] ? b['upiId'] as string : undefined;
+      billingOpts.showGst = b['showGSTOnReceipt'] !== false;
+      billingOpts.showGenericName = b['showGenericName'] === true;
+      billingOpts.thankYouMessage = typeof b['thankYouMessage'] === 'string' ? b['thankYouMessage'] as string : undefined;
+      billingOpts.terms = typeof b['termsOnReceipt'] === 'string' ? b['termsOnReceipt'] as string : undefined;
+    } catch { /* offline / error → defaults */ }
+  }
+  let qrDataUrl: string | undefined;
+  if (config.showQr) {
+    try { qrDataUrl = await QRCode.toDataURL(upiPayString(pharmacy, bill.billNumber, total), { margin: 1, width: 240 }); } catch { /* skip QR */ }
+  }
+  printReceipt(bill, total, payMethod, { pharmacy, cashier: meta.cashier, qrDataUrl, config, billing: billingOpts });
 }
 
 // ─── Camera barcode scanner (native BarcodeDetector API) ────────────────────
@@ -319,11 +541,27 @@ function CameraScanner({ open, onClose, onDetect }: { open: boolean; onClose: ()
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
+// Offline fallback: filter the cached catalogue by name/generic/barcode.
+function searchCachedMeds(q: string): Medicine[] {
+  const meds = (getCatalog()?.medicines ?? []) as Medicine[];
+  const ql = q.toLowerCase();
+  return meds.filter((m) =>
+    m.name?.toLowerCase().includes(ql) ||
+    m.genericName?.toLowerCase().includes(ql) ||
+    (m.barcode ?? '').includes(q),
+  ).slice(0, 8);
+}
+
 async function searchMeds(q: string): Promise<Medicine[]> {
-  const r = await apiFetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=8`);
-  const j = await r.json() as { success: boolean; data: { data: Medicine[] } };
-  if (!r.ok) throw new Error('Request failed');
-  return j.data?.data ?? ([] as Medicine[]);
+  if (!isOnline()) return searchCachedMeds(q);
+  try {
+    const r = await apiFetch(`/api/medicines?search=${encodeURIComponent(q)}&limit=8`);
+    const j = await r.json() as { success: boolean; data: { data: Medicine[] } };
+    if (!r.ok) throw new Error('Request failed');
+    return j.data?.data ?? ([] as Medicine[]);
+  } catch {
+    return searchCachedMeds(q); // network dropped mid-request → use cache
+  }
 }
 
 async function fetchBills(): Promise<Bill[]> {
@@ -333,11 +571,33 @@ async function fetchBills(): Promise<Bill[]> {
   return j.data?.data ?? ([] as Bill[]);
 }
 
-async function createBill(payload: object): Promise<Bill> {
-  const r = await apiFetch('/api/billing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  const j = await r.json() as { success: boolean; data: Bill; message?: string };
-  if (!j.success) throw new Error(j.message ?? 'Failed');
-  return j.data;
+interface SubmitResult { bill: Bill; offline: boolean }
+
+// Submit a bill, degrading gracefully offline: when there's no network (or it
+// drops mid-request) the bill is queued locally and a printable "OFF-…" receipt
+// is returned so the sale completes; it syncs automatically when back online.
+// A business rejection (out of stock, expired, Schedule-H) is always surfaced.
+async function submitBill(payload: Record<string, unknown>): Promise<SubmitResult> {
+  if (isOnline()) {
+    try {
+      const r = await apiFetch('/api/billing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await r.json() as { success: boolean; data: Bill; message?: string };
+      if (!r.ok || !j.success) throw new Error(j.message ?? 'Failed');
+      return { bill: j.data, offline: false };
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e; // real business error → surface it
+      // else: fetch threw (network down) → fall through to the offline path
+    }
+  }
+  const p = payload as { customer?: { name?: string }; items?: unknown[]; totalAmount?: number; paymentMethod?: string };
+  const localNo = `OFF-${Date.now().toString().slice(-6)}`;
+  const op = enqueueOp({
+    type: 'bill',
+    label: `${p.customer?.name ?? 'Walk-in'} · ${formatCurrency(p.totalAmount ?? 0)} · ${p.items?.length ?? 0} item(s)`,
+    payload,
+  });
+  const bill = { ...(payload as object), id: op.id, billNumber: localNo, items: p.items ?? [], createdAt: new Date().toISOString(), status: 'completed', paymentMethod: p.paymentMethod } as unknown as Bill;
+  return { bill, offline: true };
 }
 
 async function lookupBarcode(code: string): Promise<Medicine | null> {
@@ -346,30 +606,82 @@ async function lookupBarcode(code: string): Promise<Medicine | null> {
   return j.success ? j.data : null;
 }
 
-async function fetchMedicineInventory(medicineId: string): Promise<{ batchNumber: string; expiryDate: string; quantity: number } | null> {
+interface MedStock {
+  // Earliest-expiring non-expired batch with stock (FEFO), or null if none.
+  batch: { inventoryItemId: string; batchNumber: string; expiryDate: string; packQty: number; looseUnits: number } | null;
+  available: number;    // total non-expired available packs across batches
+  expiredOnly: boolean; // stock exists but every batch has expired
+}
+
+type RawBatch = { id: string; batchNumber: string; expiryDate: string; quantity: number; reservedQuantity?: number; looseUnits?: number; batchStatus?: string };
+
+// Pure FEFO resolver — earliest-expiring non-expired batch with stock.
+function computeStock(batches: RawBatch[]): MedStock {
+  const now = Date.now();
+  let available = 0, expiredQty = 0, bestExp = Infinity;
+  let best: MedStock['batch'] = null;
+  for (const b of batches) {
+    if (b.batchStatus && b.batchStatus !== 'active') continue;
+    const qty = b.quantity - (b.reservedQuantity ?? 0);
+    const loose = b.looseUnits ?? 0;
+    if (qty <= 0 && loose <= 0) continue;
+    const exp = new Date(b.expiryDate).getTime();
+    if (exp <= now) { expiredQty += qty; continue; }
+    available += qty;
+    if (exp < bestExp) { bestExp = exp; best = { inventoryItemId: b.id, batchNumber: b.batchNumber, expiryDate: b.expiryDate, packQty: qty, looseUnits: loose }; }
+  }
+  return { batch: best, available, expiredOnly: available === 0 && expiredQty > 0 };
+}
+
+// Resolve a medicine's billable stock. Uses the cached catalogue when offline
+// (or when the network drops mid-request) so the POS keeps working (TC_029/030).
+async function fetchMedicineStock(medicineId: string): Promise<MedStock> {
+  const fromCache = () => computeStock(((getCatalog()?.batches?.[medicineId]) ?? []) as RawBatch[]);
+  if (!isOnline()) return fromCache();
   try {
-    const r = await apiFetch(`/api/inventory?medicineId=${encodeURIComponent(medicineId)}&status=available&limit=1`);
-    if (!r.ok) return null;
-    const j = await r.json() as { data: { data: Array<{ batchNumber: string; expiryDate: string; availableQuantity: number }> } };
-    const item = j.data.data?.[0];
-    return item ? { batchNumber: item.batchNumber, expiryDate: item.expiryDate, quantity: item.availableQuantity } : null;
+    const r = await apiFetch(`/api/inventory/batches/${encodeURIComponent(medicineId)}`);
+    if (!r.ok) return { batch: null, available: 0, expiredOnly: false };
+    const j = await r.json() as { data: RawBatch[] };
+    return computeStock(j.data ?? []);
   } catch {
-    return null;
+    return fromCache();
   }
 }
 
 function exportCSV(data: Bill[]) {
-  const csv = ['Bill No.,Customer,Items,Total,Payment,Status,Date',
-    ...data.map((b) => [b.billNumber, b.customer?.name ?? 'Walk-in', b.items.length, b.totalAmount, b.paymentMethod ?? 'cash', b.status, formatDateTime(b.createdAt)].join(','))].join('\n');
+  // Quote text fields — a customer name or the formatted date/time can contain a
+  // comma, which otherwise shifts columns and leaves the time under no header (R169).
+  const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = ['Bill No.,Customer,Items,Total,Payment,Status,Date & Time',
+    ...data.map((b) => [q(b.billNumber), q(b.customerName || b.customer?.name || 'Walk-in'), b.items.length, b.totalAmount, b.paymentMethod ?? 'cash', b.status, q(formatDateTime(b.createdAt))].join(','))].join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = `bills-${new Date().toISOString().substring(0, 10)}.csv`;
   a.click();
 }
 
+// Snapshot the medicine catalogue + inventory batches to local storage so the POS
+// can search and resolve stock with no network. Best-effort; refreshed on load
+// and whenever the connection returns.
+async function refreshCatalogCache(): Promise<void> {
+  if (!isOnline()) return;
+  try {
+    const [mRes, iRes] = await Promise.all([
+      apiFetch('/api/medicines?limit=1000'),
+      apiFetch('/api/inventory?limit=1000'),
+    ]);
+    const mj = await mRes.json() as { data?: { data?: unknown[] } };
+    const ij = await iRes.json() as { data?: { data?: Array<{ medicineId: string }> } };
+    const batches: Record<string, unknown[]> = {};
+    for (const it of (ij.data?.data ?? [])) { (batches[it.medicineId] ??= []).push(it); }
+    cacheCatalog({ medicines: mj.data?.data ?? [], batches });
+  } catch { /* best effort */ }
+}
+
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export function BillingView() {
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<'pos' | 'history'>('pos');
   const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
 
@@ -384,6 +696,14 @@ export function BillingView() {
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [cashTendered, setCashTendered] = useState('');
 
+  // Keep an offline catalogue snapshot fresh (on load + when back online).
+  useEffect(() => {
+    void refreshCatalogCache();
+    const onOnline = () => { void refreshCatalogCache(); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+
   // Barcode scanner state
   const [scanMode, setScanMode] = useState(false);
   const [scanInput, setScanInput] = useState('');
@@ -396,22 +716,47 @@ export function BillingView() {
   const qc = useQueryClient();
   const { user } = useAuthStore();
 
+  // Pharmacy identity for receipts, labels, UPI QR and WhatsApp — name comes from
+  // the (kept-fresh) auth user; UPI id / phone / licence from settings.
+  const { data: pharmSettings } = useQuery({
+    queryKey: ['billing-pharmacy-settings'],
+    queryFn: async () => {
+      const r = await apiFetch('/api/settings');
+      const j = await r.json() as { data?: { profile?: Record<string, string>; billing?: { upiId?: string } } };
+      return j.data ?? {};
+    },
+    // Re-read settings whenever billing opens so a just-saved UPI ID / pharmacy
+    // detail shows immediately (no stale-cache "No UPI ID configured" error).
+    staleTime: 0,
+    refetchOnMount: 'always',
+    networkMode: 'always',
+  });
+  const pharmacyName = user?.tenantName ?? pharmSettings?.profile?.pharmacyName ?? 'Pharmacy';
+  const pharmacyPhone = pharmSettings?.profile?.mobile || pharmSettings?.profile?.phone || '';
+  const drugLicense = pharmSettings?.profile?.drugLicenseNumber || '';
+  const upiId = pharmSettings?.billing?.upiId || '';
+
   const { data: suggestions = [] } = useQuery({
     queryKey: ['med-search', search],
     queryFn: () => searchMeds(search),
     enabled: search.length >= 2,
+    networkMode: 'always', // keep running offline (searchMeds falls back to cache)
   });
 
-  const { data: inventoryMap = {} } = useQuery<Record<string, { batchNumber: string; expiryDate: string; quantity: number } | null>>({
+  const { data: inventoryMap = {} } = useQuery<Record<string, MedStock>>({
     queryKey: ['inv-map', suggestions.map(m => m.id).join(',')],
     queryFn: async () => {
       if (!suggestions.length) return {};
-      const results = await Promise.all(suggestions.map(m => fetchMedicineInventory(m.id)));
-      return Object.fromEntries(suggestions.map((m, i) => [m.id, results[i] ?? null]));
+      const results = await Promise.all(suggestions.map(m => fetchMedicineStock(m.id)));
+      return Object.fromEntries(suggestions.map((m, i) => [m.id, results[i]!]));
     },
     enabled: suggestions.length > 0 && showSugg,
+    networkMode: 'always',
     staleTime: 5 * 60 * 1000,
   });
+
+  // Phone is optional, but if provided it must be a full 10-digit number (TC_012).
+  const phoneInvalid = customerPhone.length > 0 && customerPhone.length !== 10;
 
   const subtotal = items.reduce((s, i) => s + i.sellingPrice * i.quantity * (1 - i.discount / 100), 0);
   const taxTotal = items.reduce((s, i) => s + i.gstAmount, 0);
@@ -482,7 +827,7 @@ export function BillingView() {
         ${doctor ? `<div class="row">Dr.: ${doctor}</div>` : ''}
         <div class="row">Date: ${today} &nbsp; Batch: ${item.batchNumber}</div>
         <div class="row">Expiry: ${new Date(item.expiryDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</div>
-        <div class="footer">Divya Pharmacy &bull; +91-9876543210 &bull; DL/KA/2024/0234</div>
+        <div class="footer">${[pharmacyName, pharmacyPhone, drugLicense ? `DL: ${drugLicense}` : ''].filter(Boolean).join(' &bull; ')}</div>
       </div>`
     ).join('');
     const win = window.open('', '_blank');
@@ -506,22 +851,30 @@ export function BillingView() {
   // ─── Mutations ────────────────────────────────────────────────────────────
 
   const mutation = useMutation({
-    mutationFn: createBill,
-    onSuccess: (bill) => {
-      qc.invalidateQueries({ queryKey: ['billing'] });
+    mutationFn: submitBill,
+    networkMode: 'always', // must run offline so the bill can be queued locally
+    onSuccess: ({ bill, offline }) => {
+      if (!offline) qc.invalidateQueries({ queryKey: ['billing'] });
       const savedTotal = total;
       const savedPhone = customerPhone;
       const savedBillNo = bill.billNumber;
-      printReceipt(bill, savedTotal, payMethod, user?.tenantName);
+      void printBill(bill, savedTotal, payMethod, { pharmacyName: user?.tenantName, cashier: user?.name });
       clearPOS();
-      toast.success(`Bill ${savedBillNo} created`, {
-        description: `${formatCurrency(savedTotal)} · ${payMethod.toUpperCase()}`,
-        duration: savedPhone ? 15000 : 5000,
-        action: savedPhone ? {
-          label: 'Send WhatsApp',
-          onClick: () => sendWhatsApp(savedPhone, savedBillNo, savedTotal),
-        } : undefined,
-      });
+      if (offline) {
+        toast.warning('Saved offline — will sync automatically', {
+          description: `${formatCurrency(savedTotal)} · ${payMethod.toUpperCase()} · queued as ${savedBillNo}`,
+          duration: 8000,
+        });
+      } else {
+        toast.success(`Bill ${savedBillNo} created`, {
+          description: `${formatCurrency(savedTotal)} · ${payMethod.toUpperCase()}`,
+          duration: 5000, // auto-dismiss within ~5s (Divya R162)
+          action: savedPhone ? {
+            label: 'Send WhatsApp',
+            onClick: () => sendWhatsApp(savedPhone, savedBillNo, savedTotal),
+          } : undefined,
+        });
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -530,21 +883,37 @@ export function BillingView() {
     setSearch(''); setShowSugg(false);
     setAddingMedicineId(med.id);
     try {
-      const inv = await fetchMedicineInventory(med.id);
-      const batchNum = inv?.batchNumber ?? 'AUTO';
-      const expiryDate = inv?.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const stockQty = inv?.quantity ?? 0;
+      // A medicine is billable only when it has live, non-expired stock (TC_029/030).
+      const stock = await fetchMedicineStock(med.id);
+      if (!stock.batch || stock.available <= 0) {
+        toast.error(
+          stock.expiredOnly
+            ? `${med.name}: only expired stock available — cannot be billed`
+            : `${med.name} is not in stock — add stock in Stock & Inventory before billing`,
+        );
+        return;
+      }
+      const { inventoryItemId, batchNumber, expiryDate, packQty, looseUnits } = stock.batch;
+      const unitsPerPack = Math.max(1, (med as Medicine & { unitsPerPack?: number }).unitsPerPack ?? 1);
+      const availableUnits = packQty * unitsPerPack + looseUnits;
       setItems((prev) => {
         const idx = prev.findIndex((i) => i.medicineId === med.id);
         if (idx >= 0) {
+          const existing = prev[idx]!;
+          const max = existing.saleUnit === 'unit' ? existing.availableUnits : stock.available;
+          if (existing.quantity >= max) {
+            toast.warning(`Only ${max} ${existing.saleUnit === 'unit' ? 'unit' : 'pack'}(s) of ${med.name} in stock`);
+            return prev;
+          }
           return prev.map((item, i) => i === idx ? calcLine({ ...item, quantity: item.quantity + 1 }) : item);
         }
         return [...prev, calcLine({
-          medicineId: med.id, medicineName: med.name, genericName: med.genericName,
-          batchNumber: batchNum, expiryDate,
-          quantity: 1, mrp: med.mrp, sellingPrice: med.sellingPrice, discount: 0,
+          medicineId: med.id, inventoryItemId, medicineName: med.name, genericName: med.genericName,
+          batchNumber, expiryDate,
+          quantity: 1, saleUnit: 'pack', unitsPerPack, packSellingPrice: med.sellingPrice, packMrp: med.mrp, availableUnits,
+          mrp: med.mrp, sellingPrice: med.sellingPrice, discount: 0,
           gstRate: med.gstRate, gstAmount: 0, totalAmount: 0,
-          requiresPrescription: med.requiresPrescription, schedule: med.schedule ?? null, stockQty,
+          requiresPrescription: med.requiresPrescription, schedule: med.schedule ?? null, stockQty: stock.available,
         })];
       });
     } catch {
@@ -554,8 +923,57 @@ export function BillingView() {
     }
   }, []);
 
+  // Prescription → Bill: when arriving from an approved prescription
+  // (/billing?rxId=…), pull its prescribed medicines and auto-add each in-stock
+  // one to the cart, and prefill the customer name (Vinay P10.7 / P12.1). Runs once.
+  const rxPopulated = useRef(false);
+  React.useEffect(() => {
+    const rxId = searchParams.get('rxId');
+    const cName = searchParams.get('customerName');
+    if (!rxId || rxPopulated.current) return;
+    rxPopulated.current = true;
+    if (cName) setCustomerName(cName);
+    (async () => {
+      try {
+        const r = await apiFetch(`/api/prescriptions/${rxId}`);
+        const j = await r.json() as { success: boolean; data?: { customerName?: string; customerPhone?: string; doctorName?: string; medicines?: Array<{ medicineName: string; quantity?: number }> } };
+        if (!j.success || !j.data) return;
+        if (j.data.customerName && !cName) setCustomerName(j.data.customerName);
+        if (j.data.customerPhone) setCustomerPhone(j.data.customerPhone);
+        if (j.data.doctorName) setDoctor(j.data.doctorName);
+        const meds = j.data.medicines ?? [];
+        let added = 0, missing = 0;
+        for (const pm of meds) {
+          const matches = await searchMeds(pm.medicineName);
+          const med = matches.find((m) => m.name.toLowerCase() === pm.medicineName.toLowerCase()) ?? matches[0];
+          if (med) { await addMedicine(med); added++; } else { missing++; }
+        }
+        if (added) toast.success(`Loaded ${added} prescribed medicine${added !== 1 ? 's' : ''} from the prescription`);
+        if (missing) toast.warning(`${missing} prescribed item${missing !== 1 ? 's' : ''} not found in catalog — add manually`);
+      } catch { /* non-fatal — user can add manually */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const updateItem = useCallback((idx: number, field: keyof CartItem, value: number) => {
     setItems((prev) => prev.map((item, i) => i === idx ? calcLine({ ...item, [field]: value }) : item));
+  }, []);
+
+  // Switch a line between whole-strip and loose-unit selling. Price is derived
+  // per unit from the strip price so 4 of a 15-tab strip costs 4×(₹strip/15).
+  const setSaleUnit = useCallback((idx: number, unit: 'pack' | 'unit') => {
+    setItems((prev) => prev.map((item, i) => {
+      if (i !== idx || item.saleUnit === unit) return item;
+      const round2 = (n: number) => Number(n.toFixed(2));
+      if (unit === 'unit') {
+        const price = round2(item.packSellingPrice / item.unitsPerPack);
+        const mrp = round2(item.packMrp / item.unitsPerPack);
+        const qty = Math.min(Math.max(1, item.quantity), item.availableUnits);
+        return calcLine({ ...item, saleUnit: 'unit', sellingPrice: price, mrp, quantity: qty });
+      }
+      const qty = Math.min(Math.max(1, item.quantity), item.stockQty);
+      return calcLine({ ...item, saleUnit: 'pack', sellingPrice: item.packSellingPrice, mrp: item.packMrp, quantity: qty });
+    }));
   }, []);
 
   const removeItem = useCallback((idx: number) => {
@@ -564,6 +982,10 @@ export function BillingView() {
 
   const handlePay = useCallback(() => {
     if (items.length === 0) { toast.error('Add at least one medicine'); return; }
+    if (customerPhone && customerPhone.length !== 10) {
+      toast.error('Enter a valid 10-digit phone number, or leave it blank');
+      return;
+    }
     const scheduled = items.filter((i) => i.schedule && SCHEDULED_DRUGS.includes(i.schedule));
     if (scheduled.length > 0 && (!customerName.trim() || !doctor.trim())) {
       toast.error('Schedule H/H1/X drug — patient & doctor details required', {
@@ -623,7 +1045,8 @@ export function BillingView() {
     return () => window.removeEventListener('keydown', onKey);
   }, [handlePay, handleHold, showSugg, suggestions, addMedicine]);
 
-  const upiData = `upi://pay?pa=divyapharmacy@upi&pn=Divya%20Pharmacy&am=${total.toFixed(2)}&cu=INR`;
+  // Real UPI collect QR from the tenant's configured UPI id (empty → no QR shown).
+  const upiData = upiId ? `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(pharmacyName)}&am=${total.toFixed(2)}&cu=INR` : '';
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -763,14 +1186,20 @@ export function BillingView() {
                   ) : (
                     suggestions.map((med, idx) => {
                       const inv = inventoryMap[med.id];
-                      const stock = inv != null ? inv.quantity : null;
-                      const batchNum = inv?.batchNumber ?? '—';
-                      const expiry = inv?.expiryDate;
-                      const { text: stockText, cls: stockCls } = stock !== null
-                        ? stockLabel(stock, med.reorderLevel)
-                        : { text: 'Checking stock…', cls: 'text-muted-foreground' };
+                      const loaded = inv !== undefined;
+                      const stock = loaded ? inv.available : null;
+                      const batchNum = inv?.batch?.batchNumber ?? '—';
+                      const expiry = inv?.batch?.expiryDate;
+                      const expiredOnly = inv?.expiredOnly ?? false;
+                      const { text: stockText, cls: stockCls } =
+                        !loaded ? { text: 'Checking stock…', cls: 'text-muted-foreground' }
+                        : expiredOnly ? { text: 'Expired — cannot bill', cls: 'text-destructive' }
+                        : stock === 0 ? { text: 'Out of Stock', cls: 'text-destructive' }
+                        : stockLabel(stock!, med.reorderLevel);
+                      // Only the chosen (non-expired) batch drives the expiry hint,
+                      // so a medicine with valid stock never shows "EXPIRED" (TC_003).
                       const expWarn = expiry ? expiryAlert(expiry) : null;
-                      const outOfStock = stock === 0;
+                      const outOfStock = loaded && stock === 0; // covers no-stock and expired-only
                       const isAdding = addingMedicineId === med.id;
                       return (
                         <button
@@ -862,8 +1291,18 @@ export function BillingView() {
                   <User className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                   <Input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-8 text-xs pl-7" />
                 </div>
-                <Input placeholder="Phone number" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} maxLength={10} className="h-8 text-xs" />
+                <Input
+                  placeholder="Phone number"
+                  inputMode="numeric"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  maxLength={10}
+                  className={cn('h-8 text-xs', phoneInvalid && 'border-destructive focus-visible:ring-destructive')}
+                />
               </div>
+              {phoneInvalid && (
+                <p className="mt-1 text-[10px] text-destructive font-medium">Phone number must be exactly 10 digits.</p>
+              )}
               <Input placeholder="Doctor name (for Rx)" value={doctor} onChange={(e) => setDoctor(e.target.value)} className="mt-1.5 h-8 text-xs" />
               {items.some((i) => i.schedule && SCHEDULED_DRUGS.includes(i.schedule)) && (!customerName.trim() || !doctor.trim()) && (
                 <p className="mt-1.5 text-[10px] text-destructive font-medium bg-destructive/10 rounded px-2 py-1">
@@ -876,8 +1315,8 @@ export function BillingView() {
             <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1.5">
               {items.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center">
-                  <Receipt className="h-8 w-8 text-muted-foreground/25 mb-2" />
-                  <p className="text-xs text-muted-foreground">Cart is empty</p>
+                  <PackagePlus className="h-8 w-8 text-muted-foreground/25 mb-2" />
+                  <p className="text-xs text-muted-foreground">No medicines added — search to add medicines</p>
                 </div>
               ) : (
                 items.map((item, idx) => (
@@ -898,6 +1337,21 @@ export function BillingView() {
                         </button>
                       </div>
                     </div>
+                    {item.unitsPerPack > 1 && (
+                      <div className="mb-2 flex items-center gap-2">
+                        <div className="inline-flex rounded-md border border-border p-0.5 text-[10px] font-semibold">
+                          <button onClick={() => setSaleUnit(idx, 'pack')}
+                            className={`rounded px-2 py-0.5 transition-colors ${item.saleUnit === 'pack' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Strip</button>
+                          <button onClick={() => setSaleUnit(idx, 'unit')}
+                            className={`rounded px-2 py-0.5 transition-colors ${item.saleUnit === 'unit' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Loose</button>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">
+                          {item.saleUnit === 'unit'
+                            ? `₹${item.packSellingPrice.toFixed(2)}/strip ÷ ${item.unitsPerPack} · ${item.availableUnits} units left`
+                            : `${item.unitsPerPack} units/strip · ${item.stockQty} strips left`}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <div className="flex items-center rounded-md border border-border">
                         <button onClick={() => item.quantity > 1 && updateItem(idx, 'quantity', item.quantity - 1)}
@@ -905,7 +1359,7 @@ export function BillingView() {
                           <Minus className="h-3 w-3" />
                         </button>
                         <span className="w-8 text-center text-sm font-semibold tabular-nums">{item.quantity}</span>
-                        <button onClick={() => updateItem(idx, 'quantity', item.quantity + 1)}
+                        <button onClick={() => { const max = item.saleUnit === 'unit' ? item.availableUnits : item.stockQty; if (item.quantity < max) updateItem(idx, 'quantity', item.quantity + 1); else toast.warning(`Only ${max} ${item.saleUnit === 'unit' ? 'unit' : 'strip'}(s) in stock`); }}
                           className="px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors rounded-r-md">
                           <Plus className="h-3 w-3" />
                         </button>
@@ -989,27 +1443,33 @@ export function BillingView() {
 
               {/* UPI QR panel */}
               {payMethod === 'upi' && items.length > 0 && (
-                <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 flex items-center gap-3">
-                  <div className="shrink-0 rounded-lg overflow-hidden border border-blue-200 bg-white p-1">
-                    <UPIQRCode data={upiData} size={80} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <QrCode className="h-3.5 w-3.5 text-blue-600" />
-                      <p className="text-xs font-bold text-blue-700">Scan to Pay via UPI</p>
+                upiId ? (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 flex items-center gap-3">
+                    <div className="shrink-0 rounded-lg overflow-hidden border border-blue-200 bg-white p-1">
+                      <UPIQRCode data={upiData} size={80} />
                     </div>
-                    <p className="text-xl font-bold text-blue-900 tabular-nums leading-none mb-1">
-                      {formatCurrency(total)}
-                    </p>
-                    <p className="text-xs font-mono text-blue-600">divyapharmacy@upi</p>
-                    <button
-                      className="mt-1.5 text-2xs text-blue-500 underline underline-offset-2"
-                      onClick={() => { navigator.clipboard?.writeText('divyapharmacy@upi'); toast.success('UPI ID copied'); }}
-                    >
-                      Copy UPI ID
-                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <QrCode className="h-3.5 w-3.5 text-blue-600" />
+                        <p className="text-xs font-bold text-blue-700">Scan to Pay via UPI</p>
+                      </div>
+                      <p className="text-xl font-bold text-blue-900 tabular-nums leading-none mb-1">
+                        {formatCurrency(total)}
+                      </p>
+                      <p className="text-xs font-mono text-blue-600 truncate">{upiId}</p>
+                      <button
+                        className="mt-1.5 text-2xs text-blue-500 underline underline-offset-2"
+                        onClick={() => { navigator.clipboard?.writeText(upiId); toast.success('UPI ID copied'); }}
+                      >
+                        Copy UPI ID
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-xl border border-warning/30 bg-warning/5 p-3 text-xs text-warning-700">
+                    No UPI ID configured. Add one in <span className="font-semibold">Settings → Tax &amp; Billing</span> to show a scan-to-pay QR here.
+                  </div>
+                )
               )}
 
               {/* Action buttons */}
@@ -1075,7 +1535,7 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
   };
 
   function doPrint(bill: Bill) {
-    printReceipt(bill, bill.totalAmount, bill.paymentMethod ?? 'cash', user?.tenantName);
+    void printBill(bill, bill.totalAmount, bill.paymentMethod ?? 'cash', { pharmacyName: user?.tenantName, cashier: user?.name });
   }
 
   const columns: ColumnDef<Bill>[] = [
@@ -1089,8 +1549,8 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
       header: 'Customer',
       cell: ({ row }) => (
         <div>
-          <p className="font-medium text-sm">{row.original.customer?.name ?? 'Walk-in'}</p>
-          {row.original.customer?.phone && <p className="text-xs text-muted-foreground">{row.original.customer.phone}</p>}
+          <p className="font-medium text-sm">{row.original.customerName || row.original.customer?.name || 'Walk-in'}</p>
+          {(row.original.customerPhone || row.original.customer?.phone) && <p className="text-xs text-muted-foreground">{row.original.customerPhone || row.original.customer?.phone}</p>}
         </div>
       ),
     },
@@ -1145,7 +1605,7 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
               <DropdownMenuItem onClick={() => {
                 const phone = row.original.customer!.phone!.replace(/\D/g, '');
                 const full = phone.length === 10 ? `91${phone}` : phone;
-                const msg = encodeURIComponent(`*Divya Pharmacy* — Bill ${row.original.billNumber}\nTotal: ₹${row.original.totalAmount.toFixed(2)}\nThank you! 🙏`);
+                const msg = encodeURIComponent(`*${user?.tenantName ?? 'Pharmacy'}* — Bill ${row.original.billNumber}\nTotal: ₹${row.original.totalAmount.toFixed(2)}\nThank you! 🙏`);
                 window.open(`https://wa.me/${full}?text=${msg}`, '_blank');
               }}>
                 <MessageCircle className="h-4 w-4" /> Send WhatsApp
@@ -1211,11 +1671,11 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
             <div className="grid grid-cols-2 gap-y-1.5 gap-x-4 rounded-lg bg-muted/40 p-3 text-sm">
               <div><span className="text-muted-foreground">Date: </span>{formatDateTime(viewBill.createdAt)}</div>
               <div><span className="text-muted-foreground">Payment: </span><span className="capitalize font-medium">{viewBill.paymentMethod ?? 'cash'}</span></div>
-              <div><span className="text-muted-foreground">Customer: </span>{viewBill.customer?.name ?? 'Walk-in'}</div>
+              <div><span className="text-muted-foreground">Customer: </span>{viewBill.customerName || viewBill.customer?.name || 'Walk-in'}</div>
               <div><span className="text-muted-foreground">Status: </span>
                 <Badge variant={viewBill.status === 'completed' ? 'success' : viewBill.status === 'cancelled' ? 'muted' : 'warning'} dot className="text-xs capitalize">{viewBill.status.replace('_', ' ')}</Badge>
               </div>
-              {viewBill.customer?.phone && <div className="col-span-2"><span className="text-muted-foreground">Phone: </span>{viewBill.customer.phone}</div>}
+              {(viewBill.customerPhone || viewBill.customer?.phone) && <div className="col-span-2"><span className="text-muted-foreground">Phone: </span>{viewBill.customerPhone || viewBill.customer?.phone}</div>}
             </div>
 
             <table className="w-full text-sm">

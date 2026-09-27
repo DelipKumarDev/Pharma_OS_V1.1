@@ -53,15 +53,22 @@ export async function adjust(req: AuthRequest, res: Response, next: NextFunction
   } catch (err) { next(err); }
 }
 
+export async function edit(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const item = await inventoryService.editInventoryItem(t(req), req.params['id']!, req.body, req.user!.sub, req.user!.name);
+    sendSuccess(res, item, 'Stock entry updated');
+  } catch (err) { next(err); }
+}
+
 export async function updateStatus(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { status } = req.body as { status: string };
+    const { status, sellingPrice } = req.body as { status: string; sellingPrice?: number };
     const valid: string[] = ['available', 'low_stock', 'out_of_stock', 'expired', 'damaged'];
     if (!valid.includes(status)) {
       res.status(422).json({ success: false, message: `Invalid status. Must be one of: ${valid.join(', ')}` });
       return;
     }
-    const item = await inventoryService.updateInventoryStatus(t(req), req.params['id']!, status as InventoryStatus);
+    const item = await inventoryService.updateInventoryStatus(t(req), req.params['id']!, status as InventoryStatus, sellingPrice);
     sendSuccess(res, item, 'Inventory status updated');
   } catch (err) { next(err); }
 }

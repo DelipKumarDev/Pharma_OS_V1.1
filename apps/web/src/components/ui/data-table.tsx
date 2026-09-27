@@ -26,10 +26,27 @@ interface DataTableProps<TData, TValue> {
   loading?: boolean;
   searchPlaceholder?: string;
   searchColumn?: string;
+  globalSearch?: boolean;                 // search across ALL columns
   toolbar?: React.ReactNode;
   pageSize?: number;
+  pageSizeOptions?: number[];             // page-record-count selector
   emptyMessage?: string;
   emptyDescription?: string;
+}
+
+// Global search that matches ANY underlying field of a row (not just columns
+// with an accessorKey). Custom-rendered cells — customer name, phone, email,
+// patient name, vendor contact — are otherwise invisible to TanStack's default
+// `includesString` filter, which is why search "only worked on one column".
+function collectValues(v: unknown, depth = 0): string {
+  if (v == null || depth > 4) return '';
+  if (typeof v === 'object') return Object.values(v as Record<string, unknown>).map((x) => collectValues(x, depth + 1)).join(' ');
+  return String(v);
+}
+function globalRowFilter<TData>(row: { original: TData }, _columnId: string, filterValue: string): boolean {
+  const q = String(filterValue ?? '').toLowerCase().trim();
+  if (!q) return true;
+  return collectValues(row.original).toLowerCase().includes(q);
 }
 
 export function DataTable<TData, TValue>({
@@ -38,41 +55,56 @@ export function DataTable<TData, TValue>({
   loading = false,
   searchPlaceholder = 'Search…',
   searchColumn,
+  globalSearch = false,
   toolbar,
   pageSize = 20,
+  pageSizeOptions = [5, 10, 20, 50, 100],
   emptyMessage = 'No records found',
   emptyDescription = 'Try adjusting your search or filters.',
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
+  const [globalFilter, setGlobalFilter] = React.useState('');
+  const [currentPageSize, setCurrentPageSize] = React.useState(pageSize);
 
   const table = useReactTable({
     data,
     columns,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    onGlobalFilterChange: setGlobalFilter,
+    globalFilterFn: globalRowFilter,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
-    state: { sorting, columnFilters, columnVisibility },
+    state: { sorting, columnFilters, columnVisibility, globalFilter },
     initialState: { pagination: { pageSize } },
   });
+
+  React.useEffect(() => { table.setPageSize(currentPageSize); }, [currentPageSize, table]);
 
   return (
     <div className="space-y-3">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        {searchColumn && (
+        {globalSearch ? (
+          <Input
+            placeholder={searchPlaceholder}
+            value={globalFilter}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            className="h-8 w-64 text-xs"
+          />
+        ) : searchColumn ? (
           <Input
             placeholder={searchPlaceholder}
             value={(table.getColumn(searchColumn)?.getFilterValue() as string) ?? ''}
             onChange={(e) => table.getColumn(searchColumn)?.setFilterValue(e.target.value)}
             className="h-8 w-64 text-xs"
           />
-        )}
+        ) : null}
         {toolbar}
       </div>
 
@@ -86,7 +118,7 @@ export function DataTable<TData, TValue>({
                   {headerGroup.headers.map((header) => (
                     <th
                       key={header.id}
-                      className="h-10 px-4 text-left align-middle text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                      className="h-10 px-4 text-left align-middle text-xs font-bold uppercase tracking-wider text-foreground whitespace-nowrap"
                     >
                       {header.isPlaceholder
                         ? null
@@ -134,13 +166,24 @@ export function DataTable<TData, TValue>({
       </div>
 
       {/* Pagination */}
-      {!loading && table.getPageCount() > 1 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <p>
-            Showing {table.getState().pagination.pageIndex * pageSize + 1}–
-            {Math.min((table.getState().pagination.pageIndex + 1) * pageSize, table.getFilteredRowModel().rows.length)} of{' '}
-            {table.getFilteredRowModel().rows.length} results
-          </p>
+      {!loading && table.getFilteredRowModel().rows.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3">
+            <p>
+              Showing {table.getState().pagination.pageIndex * currentPageSize + 1}–
+              {Math.min((table.getState().pagination.pageIndex + 1) * currentPageSize, table.getFilteredRowModel().rows.length)} of{' '}
+              {table.getFilteredRowModel().rows.length} results
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span>Rows:</span>
+              <Select value={String(currentPageSize)} onValueChange={(v) => setCurrentPageSize(Number(v))}>
+                <SelectTrigger className="h-7 w-16 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {pageSizeOptions.map((n) => <SelectItem key={n} value={String(n)} className="text-xs">{n}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="flex items-center gap-1">
             <Button variant="outline" size="icon-sm" onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}>
               <ChevronsLeft className="h-3.5 w-3.5" />
@@ -167,7 +210,9 @@ export function DataTable<TData, TValue>({
 export function SortableHeader({ column, children }: { column: { toggleSorting: (desc?: boolean) => void; getIsSorted: () => false | 'asc' | 'desc' }; children: React.ReactNode }) {
   return (
     <button
-      className="flex items-center gap-1 hover:text-foreground"
+      // Buttons reset text-transform, so force uppercase to match plain <th>
+      // headers — keeps every column header uniform (TC_005/TC_008).
+      className="flex items-center gap-1 uppercase tracking-wider font-bold hover:text-foreground"
       onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
     >
       {children}

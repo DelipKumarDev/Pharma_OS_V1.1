@@ -12,6 +12,7 @@ router.get('/movements/:medicineId', requirePermission('inventory', 'view'), inv
 router.get('/', requirePermission('inventory', 'view'), inventoryController.list);
 router.post('/', requirePermission('inventory', 'create'), inventoryController.create);
 router.patch('/:id/adjust', requirePermission('inventory', 'edit'), inventoryController.adjust);
+router.patch('/:id', requirePermission('inventory', 'edit'), inventoryController.edit);
 router.patch('/:id/status', requirePermission('inventory', 'edit'), inventoryController.updateStatus);
 router.delete('/:id', requirePermission('inventory', 'delete'), inventoryController.remove);
 

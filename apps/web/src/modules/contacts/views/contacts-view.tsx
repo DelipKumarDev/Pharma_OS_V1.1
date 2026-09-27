@@ -19,6 +19,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useRefillMessage, openWhatsApp } from '@/lib/reminder';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ const STATUS_CFG: Record<string, { label: string; variant: 'destructive' | 'warn
 
 function RefillTab() {
   const qc = useQueryClient();
+  const refillMsg = useRefillMessage(); // TC_013: tenant-configured template
   const { data, isLoading } = useQuery({ queryKey: ['refills'], queryFn: fetchRefills });
 
   const remindMutation = useMutation({
@@ -76,37 +78,29 @@ function RefillTab() {
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['refills'] });
       const r = data?.reminders.find((x) => x.id === id);
-      toast.success(`Reminder sent to ${r?.customerName ?? 'customer'}`);
+      // Honest wording: without a WhatsApp Business API key the message is opened
+      // in WhatsApp for the staff to send — it is not auto-delivered (Vinay P3.2).
+      toast.success(`WhatsApp opened for ${r?.customerName ?? 'customer'}`, { description: 'Press send in WhatsApp to deliver the reminder.' });
     },
   });
 
-  function openWhatsApp(r: RefillReminder) {
-    const digits = r.phone.replace(/\D/g, '');
-    const full = digits.length === 10 ? `91${digits}` : digits;
-    const due = r.status === 'overdue'
-      ? `Your refill of *${r.medicine}* was due ${r.daysOverdue} day${r.daysOverdue !== 1 ? 's' : ''} ago.`
-      : `Your refill of *${r.medicine}* is due today.`;
-    const msg = encodeURIComponent(
-      `Hello ${r.customerName.split(' ')[0]},\n\n${due} Please visit Divya Pharmacy or call us at +91-9876543210 to refill your prescription.\n\n_Divya Pharmacy, MG Road, Bangalore_`
-    );
-    window.open(`https://wa.me/${full}?text=${msg}`, '_blank');
+  function overdueText(r: RefillReminder) {
+    return r.status === 'overdue' ? ` (${r.daysOverdue} day${r.daysOverdue !== 1 ? 's' : ''} overdue)` : r.status === 'due_today' ? ' today' : '';
+  }
+
+  function openWhatsAppFor(r: RefillReminder) {
+    const sent = openWhatsApp(r.phone, refillMsg({ customerName: r.customerName, medicine: r.medicine, overdue: overdueText(r) }));
+    if (!sent) { toast.error(`No valid phone for ${r.customerName}`); return; }
     void remindMutation.mutateAsync(r.id);
   }
 
   function remindAllOverdue() {
     const overdue = data?.reminders.filter((r) => r.status === 'overdue') ?? [];
     if (overdue.length === 0) { toast.info('No overdue reminders'); return; }
-    overdue.forEach((r) => void remindMutation.mutateAsync(r.id));
-    toast.success(`${overdue.length} overdue reminders queued`, {
-      description: 'WhatsApp messages will open in separate tabs.',
-    });
+    toast.success(`${overdue.length} overdue reminders queued`, { description: 'WhatsApp messages will open in separate tabs.' });
     overdue.forEach((r) => {
-      const digits = r.phone.replace(/\D/g, '');
-      const full = digits.length === 10 ? `91${digits}` : digits;
-      const msg = encodeURIComponent(
-        `Hello ${r.customerName.split(' ')[0]},\n\nYour refill of *${r.medicine}* is overdue by ${r.daysOverdue} day${r.daysOverdue !== 1 ? 's' : ''}. Please visit us at Divya Pharmacy.\n\n_Divya Pharmacy, MG Road_`
-      );
-      window.open(`https://wa.me/${full}?text=${msg}`, '_blank');
+      openWhatsApp(r.phone, refillMsg({ customerName: r.customerName, medicine: r.medicine, overdue: overdueText(r) }));
+      void remindMutation.mutateAsync(r.id);
     });
   }
 
@@ -210,7 +204,7 @@ function RefillTab() {
                   </div>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => openWhatsApp(r)}
+                      onClick={() => openWhatsAppFor(r)}
                       title="Send WhatsApp reminder"
                       className="flex items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1.5 text-[11px] font-medium text-green-700 hover:bg-green-100 transition-colors"
                     >
@@ -352,10 +346,8 @@ export function ContactsView() {
             <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem><Eye className="h-4 w-4" /> View History</DropdownMenuItem>
-            <DropdownMenuItem><ShoppingBag className="h-4 w-4" /> New Bill</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive"><span>Deactivate</span></DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/customers')}><Eye className="h-4 w-4" /> View / Manage</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/billing')}><ShoppingBag className="h-4 w-4" /> New Bill</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -440,10 +432,8 @@ export function ContactsView() {
             <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem><Eye className="h-4 w-4" /> View Invoices</DropdownMenuItem>
-            <DropdownMenuItem><CreditCard className="h-4 w-4" /> Record Payment</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive"><span>Deactivate</span></DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/vendors')}><Eye className="h-4 w-4" /> View / Manage</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push('/purchase-orders')}><CreditCard className="h-4 w-4" /> Purchase Orders</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -501,7 +491,7 @@ export function ContactsView() {
             columns={customerColumns}
             data={customers}
             loading={custLoading}
-            searchColumn="name"
+            globalSearch
             searchPlaceholder="Search by name or phone…"
             emptyMessage="No customers yet"
             emptyDescription="Add your first customer or import a list from Excel in Settings › Import."

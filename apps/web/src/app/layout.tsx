@@ -23,12 +23,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'PharmaOS',
-    template: '%s | PharmaOS',
+    default: 'Pharma Ist',
+    template: '%s | Pharma Ist',
   },
   description: 'Enterprise Pharmacy Management Platform',
   keywords: ['pharmacy', 'inventory', 'billing', 'medicine', 'POS'],
-  authors: [{ name: 'PharmaOS Team' }],
+  authors: [{ name: 'Z2INFY Technologies' }],
   manifest: '/manifest.json',
   icons: {
     icon: '/favicon.ico',

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Shield, Users, Trash2, Lock, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Shield, Users, Trash2, Lock, XCircle, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Role } from '@pharmaos/types';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,15 @@ async function fetchRoles(): Promise<Role[]> {
   return json.data?.data ?? ([] as Role[]);
 }
 
+interface PermissionDef { id: string; module: string; action: string }
+
+async function fetchPermissions(): Promise<PermissionDef[]> {
+  const res = await apiFetch('/api/roles/permissions');
+  const json = await res.json() as { success: boolean; data: PermissionDef[] };
+  if (!res.ok) throw new Error('Request failed');
+  return json.data ?? [];
+}
+
 async function createRole(data: { name: string; description: string; permissionIds: string[] }): Promise<Role> {
   const res = await apiFetch('/api/roles', {
     method: 'POST',
@@ -44,6 +53,17 @@ async function createRole(data: { name: string; description: string; permissionI
   return json.data;
 }
 
+async function updateRole(id: string, data: { name: string; description: string; permissionIds: string[] }): Promise<Role> {
+  const res = await apiFetch(`/api/roles/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  const json = await res.json() as { success: boolean; data: Role; message?: string };
+  if (!res.ok || !json.success) throw new Error(json.message ?? 'Failed to update role');
+  return json.data;
+}
+
 async function deleteRole(id: string) {
   const res = await apiFetch(`/api/roles/${id}`, { method: 'DELETE' });
   const json = await res.json() as { success: boolean; message?: string };
@@ -52,23 +72,49 @@ async function deleteRole(id: string) {
 
 export function RolesView() {
   const qc = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
+  // dialogRole: null = closed, 'new' = create, Role = edit that role.
+  const [dialogRole, setDialogRole] = useState<Role | 'new' | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
 
   const { data: roles = [], isLoading } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
+  const { data: permCatalog = [] } = useQuery({ queryKey: ['permissions'], queryFn: fetchPermissions });
 
-  const createMutation = useMutation({
-    mutationFn: createRole,
+  // Map "module:action" ⇄ real permission id (roles link by permission id).
+  const permIdByKey = React.useMemo(
+    () => new Map(permCatalog.map((p) => [`${p.module}:${p.action}`, p.id])),
+    [permCatalog],
+  );
+
+  function openCreate() {
+    setNewName(''); setNewDesc(''); setPermissions({}); setDialogRole('new');
+  }
+  function openEdit(role: Role) {
+    setNewName(role.name);
+    setNewDesc(role.description ?? '');
+    const seed: Record<string, boolean> = {};
+    role.permissions.forEach((p) => { seed[`${p.module}:${p.action}`] = true; });
+    setPermissions(seed);
+    setDialogRole(role);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const permissionIds = Object.keys(permissions)
+        .filter((k) => permissions[k])
+        .map((k) => permIdByKey.get(k))
+        .filter((id): id is string => !!id);
+      const payload = { name: newName.trim(), description: newDesc.trim(), permissionIds };
+      return dialogRole === 'new' || !dialogRole
+        ? createRole(payload)
+        : updateRole(dialogRole.id, payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['roles'] });
-      toast.success('Role created successfully');
-      setCreateOpen(false);
-      setNewName('');
-      setNewDesc('');
-      setPermissions({});
+      toast.success(dialogRole === 'new' ? 'Role created successfully' : 'Role updated');
+      setDialogRole(null);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -88,9 +134,9 @@ export function RolesView() {
     setPermissions((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  function handleCreate() {
+  function handleSave() {
     if (!newName.trim()) { toast.error('Role name is required'); return; }
-    createMutation.mutate({ name: newName, description: newDesc, permissionIds: Object.keys(permissions).filter((k) => permissions[k]) });
+    saveMutation.mutate();
   }
 
   if (isLoading) {
@@ -104,7 +150,7 @@ export function RolesView() {
           <h1 className="text-2xl font-bold tracking-tight">Roles & Permissions</h1>
           <p className="text-sm text-muted-foreground">Manage staff roles and their access control across modules</p>
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
+        <Button size="sm" onClick={openCreate}>
           <Plus className="h-4 w-4" /> Create Role
         </Button>
       </div>
@@ -129,9 +175,14 @@ export function RolesView() {
                 </div>
               </div>
               {!role.isSystem && (
-                <button onClick={() => setDeleteTarget(role)} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-0.5">
+                  <button onClick={() => openEdit(role)} className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary" title="Edit role">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button onClick={() => setDeleteTarget(role)} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete role">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               )}
             </div>
 
@@ -216,11 +267,11 @@ export function RolesView() {
         </div>
       </div>
 
-      {/* Create Role Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      {/* Create / Edit Role Dialog */}
+      <Dialog open={dialogRole !== null} onOpenChange={(o) => !o && setDialogRole(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create New Role</DialogTitle>
+            <DialogTitle>{dialogRole === 'new' || !dialogRole ? 'Create New Role' : `Edit Role — ${dialogRole.name}`}</DialogTitle>
             <DialogDescription>Define the role name and select which permissions to grant</DialogDescription>
           </DialogHeader>
 
@@ -263,9 +314,9 @@ export function RolesView() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
-              Create Role
+            <Button variant="outline" onClick={() => setDialogRole(null)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saveMutation.isPending}>
+              {dialogRole === 'new' || !dialogRole ? 'Create Role' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>

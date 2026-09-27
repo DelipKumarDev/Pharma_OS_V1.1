@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { exportToExcel } from '@/lib/export';
 
 async function fetchReorderStats(): Promise<ReorderStats> {
   const res = await apiFetch('/api/reorder/stats');
@@ -213,7 +214,7 @@ function AlertCard({ alert, onAcknowledge }: { alert: ReorderAlert; onAcknowledg
 
 export function ReorderView() {
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('pending');
+  const [statusFilter, setStatusFilter] = useState('all');
   const qc = useQueryClient();
 
   const { data: stats } = useQuery({ queryKey: ['reorder-stats'], queryFn: fetchReorderStats });
@@ -236,14 +237,10 @@ export function ReorderView() {
   });
 
   function exportReorderList() {
+    if (items.length === 0) { toast.warning('No items to export'); return; }
     const headers = ['Medicine', 'Generic', 'Current Stock', 'Reorder Level', 'Suggested Qty', 'Priority', 'Status', 'Days Left', 'Preferred Vendor', 'Last Price'];
-    const rows = items.map(i => [i.medicineName, i.genericName ?? '', i.currentStock, i.reorderLevel, i.suggestedQty, i.priority, i.status, i.daysStockLeft ?? '', i.preferredVendor ?? '', i.lastPurchasePrice ?? ''].join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `reorder-queue-${new Date().toISOString().split('T')[0]}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    const rows = items.map(i => [i.medicineName, i.genericName ?? '', i.currentStock, i.reorderLevel, i.suggestedQty, i.priority, i.status, i.daysStockLeft ?? '', i.preferredVendor ?? '', i.lastPurchasePrice ?? '']);
+    exportToExcel(`reorder-queue-${new Date().toISOString().split('T')[0]}`, headers, rows);
     toast.success('Reorder list exported');
   }
 
@@ -260,7 +257,7 @@ export function ReorderView() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Reorder Intelligence</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Reorder Queue</h1>
           <p className="text-sm text-muted-foreground">Smart procurement queue — never run out of critical medicines</p>
         </div>
         <div className="flex gap-2">

@@ -22,6 +22,7 @@ interface CreateMedicineInput {
   form?: string;
   strength?: string;
   unit?: string;
+  unitsPerPack?: number;
   composition?: string;
   hsn?: string;
   barcode?: string;
@@ -39,7 +40,7 @@ interface CreateMedicineInput {
 
 export async function listMedicines(tenantId: string, query: ListMedicinesQuery) {
   const page = query.page ?? 1;
-  const limit = Math.min(query.limit ?? 20, 100);
+  const limit = Math.min(query.limit ?? 20, 1000);
   const skip = (page - 1) * limit;
 
   const where: Prisma.MedicineWhereInput = {
@@ -61,7 +62,7 @@ export async function listMedicines(tenantId: string, query: ListMedicinesQuery)
   };
 
   const [medicines, total] = await Promise.all([
-    prisma.medicine.findMany({ where, skip, take: limit, orderBy: { name: 'asc' } }),
+    prisma.medicine.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
     prisma.medicine.count({ where }),
   ]);
 
@@ -90,7 +91,19 @@ function assertSafeName(name: string) {
   if (/[<>]/.test(name)) throw new AppError('Medicine name contains invalid characters (< or >)', 422);
 }
 
-export async function createMedicine(tenantId: string, input: CreateMedicineInput, userId: string, userName: string) {
+// An unselected dropdown can arrive as an empty string, which is an invalid enum
+// value to Prisma (→ raw 400/500). Coerce empty enum strings to undefined so the
+// column default / null applies instead of erroring.
+function sanitizeMedicineEnums<T extends object>(input: T): T {
+  const out = { ...input } as Record<string, unknown>;
+  for (const k of ['category', 'form', 'unit', 'schedule']) {
+    if (out[k] === '') delete out[k];
+  }
+  return out as T;
+}
+
+export async function createMedicine(tenantId: string, rawInput: CreateMedicineInput, userId: string, userName: string) {
+  const input = sanitizeMedicineEnums(rawInput);
   if (!input.name?.trim()) throw new AppError('Medicine name is required', 422);
   if (input.name.length > 150) throw new AppError('Medicine name must not exceed 150 characters', 422);
   assertSafeName(input.name);
@@ -144,7 +157,7 @@ export async function updateMedicine(
 
   const medicine = await prisma.medicine.update({
     where: { id },
-    data: { ...input, updatedBy: userId } as Prisma.MedicineUncheckedUpdateInput,
+    data: { ...sanitizeMedicineEnums(input), updatedBy: userId } as Prisma.MedicineUncheckedUpdateInput,
   });
 
   await createAuditLog({

@@ -1,7 +1,7 @@
 {
-  "name": "PharmaOS",
-  "short_name": "PharmaOS",
-  "description": "Enterprise Pharmacy Management Platform",
+  "name": "Pharma Ist",
+  "short_name": "Pharma Ist",
+  "description": "Pharma Ist — a next-gen pharmacy management system by Z2INFY Technologies. Smarter Pharmacy. First with You.",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",

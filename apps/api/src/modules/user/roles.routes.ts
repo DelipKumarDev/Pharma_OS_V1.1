@@ -18,14 +18,19 @@ router.post('/', requirePermission('users', 'create'), async (req: AuthRequest, 
   try {
     const { name } = req.body as { name?: string };
     if (!name?.trim()) { res.status(422).json({ success: false, message: 'Role name is required' }); return; }
-    sendSuccess(res, await userService.createRole(t(req), req.body, req.user!.sub), 'Role created', 201);
+    sendSuccess(res, await userService.createRole(t(req), req.body, req.user!.sub, req.user!.permissions), 'Role created', 201);
   } catch (err) { next(err); }
+});
+// Full catalogue of assignable permissions (module:action) with their real ids —
+// the UI maps its checkbox grid to these ids when creating/updating a role.
+router.get('/permissions', requirePermission('users', 'view'), async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await userService.listPermissions()); } catch (err) { next(err); }
 });
 router.get('/:id', requirePermission('users', 'view'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { sendSuccess(res, await userService.getRoleById(t(req), req.params['id']!)); } catch (err) { next(err); }
 });
 router.put('/:id', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try { sendSuccess(res, await userService.updateRole(t(req), req.params['id']!, req.body, req.user!.sub)); } catch (err) { next(err); }
+  try { sendSuccess(res, await userService.updateRole(t(req), req.params['id']!, req.body, req.user!.sub, req.user!.permissions)); } catch (err) { next(err); }
 });
 router.delete('/:id', requirePermission('users', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try { await userService.deleteRole(t(req), req.params['id']!); sendSuccess(res, null, 'Role deleted'); } catch (err) { next(err); }
