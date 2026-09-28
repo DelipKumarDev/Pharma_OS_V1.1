@@ -26,6 +26,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
+import { useDropdown } from '@/lib/dropdowns';
+import { useCan } from '@/lib/permissions';
+
+/** Turn a snake_case option into a human label, preferring the known TYPE_LABEL. */
+function customerTypeLabel(value: string): string {
+  return TYPE_LABEL[value]?.label ?? value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 async function fetchCustomerStats(): Promise<CustomerStats> {
   const res = await apiFetch('/api/customers/stats');
@@ -72,7 +79,7 @@ const customerSchema = z.object({
   }, 'Enter a valid date of birth'),
   gender: z.enum(['male', 'female', 'other']).optional(),
   doctorName: z.string().optional(),
-  customerType: z.enum(['walk_in', 'regular', 'vip', 'credit']).optional(),
+  customerType: z.string().optional(),
   notes: z.string().optional(),
 });
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -90,6 +97,7 @@ const DEFAULT_TYPE_INFO: TypeInfo = { label: 'Regular', variant: 'success', icon
 
 function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
+  const customerTypes = useDropdown('customerType');
   const { register, handleSubmit, reset, formState: { errors } } = useForm<CustomerFormValues>({ mode: 'onTouched', resolver: zodResolver(customerSchema) });
 
   const mutation = useMutation({
@@ -150,10 +158,9 @@ function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             <div className="space-y-1">
               <Label>Customer Type</Label>
               <select {...register('customerType')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
-                <option value="regular">Regular</option>
-                <option value="walk_in">Walk-in</option>
-                <option value="vip">VIP</option>
-                <option value="credit">Credit Account</option>
+                {customerTypes.map((t) => (
+                  <option key={t} value={t}>{customerTypeLabel(t)}</option>
+                ))}
               </select>
             </div>
             <div className="col-span-2 space-y-1">
@@ -281,6 +288,7 @@ function CustomerDetailSheet({ customer, open, onOpenChange }: { customer: Custo
 }
 
 export function CustomersView() {
+  const can = useCan();
   const [addOpen, setAddOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -412,10 +420,12 @@ export function CustomersView() {
             }}>
               <Phone className="h-4 w-4" /> Send Reminder
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setPaymentCustomer(row.original)}>
-              <Wallet className="h-4 w-4" /> Record Payment
-            </DropdownMenuItem>
+            {can('customers:edit') && <DropdownMenuSeparator />}
+            {can('customers:edit') && (
+              <DropdownMenuItem onClick={() => setPaymentCustomer(row.original)}>
+                <Wallet className="h-4 w-4" /> Record Payment
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -442,9 +452,11 @@ export function CustomersView() {
           <Button variant="outline" size="sm" onClick={exportCSV}>
             <Download className="h-4 w-4" /> Export
           </Button>
+          {can('customers:create') && (
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" /> Add Customer
           </Button>
+          )}
         </div>
       </div>
 

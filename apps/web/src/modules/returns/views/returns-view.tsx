@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ const CONDITION_CONFIG = {
 
 function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () => void }) {
   const qc = useQueryClient();
+  const can = useCan();
 
   const approveMut = useMutation({
     mutationFn: async () => {
@@ -236,7 +238,7 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
         </div>
 
         <SheetFooter className="gap-2 px-6 pb-6 pt-2">
-          {ret.status === 'pending' && (
+          {ret.status === 'pending' && can('returns:approve') && (
             <>
               <Button variant="destructive" size="sm" className="flex-1" onClick={() => rejectMut.mutate()} disabled={rejectMut.isPending}>
                 <XCircle className="h-4 w-4" /> Reject
@@ -246,7 +248,7 @@ function ReturnDetailSheet({ ret, onClose }: { ret: ReturnRequest; onClose: () =
               </Button>
             </>
           )}
-          {ret.status === 'approved' && (
+          {ret.status === 'approved' && can('returns:approve') && (
             <Button className="flex-[2]" onClick={() => processMut.mutate()} disabled={processMut.isPending}>
               {processMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Process Return & Update Stock</>}
             </Button>
@@ -547,6 +549,7 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function ReturnsView() {
+  const can = useCan();
   const [typeFilter, setTypeFilter] = useState<ReturnType | 'all'>('all');
   const [pendingOnly, setPendingOnly] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<ReturnRequest | null>(null);
@@ -635,7 +638,7 @@ export function ReturnsView() {
             <DropdownMenuItem onClick={() => setSelectedReturn(row.original)}>
               <Eye className="h-4 w-4" /> View Details
             </DropdownMenuItem>
-            {row.original.status === 'pending' && (
+            {row.original.status === 'pending' && can('returns:approve') && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setSelectedReturn(row.original)}>
@@ -643,7 +646,7 @@ export function ReturnsView() {
                 </DropdownMenuItem>
               </>
             )}
-            {row.original.status === 'approved' && (
+            {row.original.status === 'approved' && can('returns:approve') && (
               <DropdownMenuItem onClick={() => setSelectedReturn(row.original)}>
                 <Package className="h-4 w-4" /> Process Return
               </DropdownMenuItem>
@@ -662,9 +665,11 @@ export function ReturnsView() {
           <h1 className="text-2xl font-bold tracking-tight">Returns</h1>
           <p className="text-sm text-muted-foreground">Manage customer returns, vendor returns and stock reconciliation</p>
         </div>
-        <Button size="sm" onClick={() => setNewReturnOpen(true)}>
-          <Plus className="h-4 w-4" /> New Return
-        </Button>
+        {can('returns:create') && (
+          <Button size="sm" onClick={() => setNewReturnOpen(true)}>
+            <Plus className="h-4 w-4" /> New Return
+          </Button>
+        )}
       </div>
 
       {/* Stats */}

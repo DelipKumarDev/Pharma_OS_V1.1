@@ -28,7 +28,7 @@ export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
   medicineForm: ['tablet', 'capsule', 'syrup', 'injection', 'cream', 'ointment', 'drops', 'inhaler', 'powder', 'gel', 'patch', 'spray', 'lotion', 'suspension', 'suppository'],
   medicineUnit: ['strip', 'bottle', 'vial', 'tube', 'sachet', 'box', 'piece'],
   gstRate: ['0', '5', '12', '18', '28'],
-  customerType: ['walk_in', 'regular', 'wholesale', 'staff'],
+  customerType: ['walk_in', 'regular', 'vip', 'credit'],
   paymentMethod: ['cash', 'upi', 'card', 'credit'],
 };
 

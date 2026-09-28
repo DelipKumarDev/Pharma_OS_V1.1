@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -144,6 +145,7 @@ function RejectDialog({ rx, onClose }: { rx: Prescription; onClose: () => void }
 
 function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void }) {
   const router = useRouter();
+  const can = useCan();
   const [expanded, setExpanded] = useState(true);
   const [rejectOpen, setRejectOpen] = useState(false);
   const qc = useQueryClient();
@@ -326,7 +328,7 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
           </div>
 
           <SheetFooter className="gap-2 px-6 pb-6 pt-2">
-            {rx.status === 'pending_review' && (
+            {rx.status === 'pending_review' && can('prescriptions:approve') && (
               <>
                 <Button variant="destructive" className="flex-1" onClick={() => setRejectOpen(true)}>
                   <XCircle className="h-4 w-4" /> Reject
@@ -338,12 +340,16 @@ function RxDetailSheet({ rx, onClose }: { rx: Prescription; onClose: () => void 
             )}
             {rx.status === 'approved' && (
               <>
-                <Button variant="outline" className="flex-1" onClick={() => { onClose(); router.push(`/billing?rxId=${rx.id}&customerName=${encodeURIComponent(rx.customerName)}`); }}>
-                  <Receipt className="h-4 w-4" /> Create Bill
-                </Button>
-                <Button className="flex-1" onClick={() => dispenseMut.mutate()} disabled={dispenseMut.isPending}>
-                  {dispenseMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Mark Dispensed</>}
-                </Button>
+                {can('billing:create') && (
+                  <Button variant="outline" className="flex-1" onClick={() => { onClose(); router.push(`/billing?rxId=${rx.id}&customerName=${encodeURIComponent(rx.customerName)}`); }}>
+                    <Receipt className="h-4 w-4" /> Create Bill
+                  </Button>
+                )}
+                {can('prescriptions:edit') && (
+                  <Button className="flex-1" onClick={() => dispenseMut.mutate()} disabled={dispenseMut.isPending}>
+                    {dispenseMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Mark Dispensed</>}
+                  </Button>
+                )}
               </>
             )}
             {rx.status === 'dispensed' && (
@@ -606,6 +612,7 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export function PrescriptionsView() {
+  const can = useCan();
   const [activeTab, setActiveTab] = useState<PrescriptionStatus | 'all'>('all');
   const [selectedRx, setSelectedRx] = useState<Prescription | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -693,7 +700,7 @@ export function PrescriptionsView() {
             <DropdownMenuItem onClick={() => setSelectedRx(row.original)}>
               <Eye className="h-4 w-4" /> View Details
             </DropdownMenuItem>
-            {row.original.status === 'pending_review' && (
+            {row.original.status === 'pending_review' && can('prescriptions:approve') && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setSelectedRx(row.original)}>
@@ -701,7 +708,7 @@ export function PrescriptionsView() {
                 </DropdownMenuItem>
               </>
             )}
-            {row.original.status === 'approved' && (
+            {row.original.status === 'approved' && can('billing:create') && (
               <DropdownMenuItem onClick={() => setSelectedRx(row.original)}>
                 <Receipt className="h-4 w-4" /> Create Bill
               </DropdownMenuItem>
@@ -720,9 +727,11 @@ export function PrescriptionsView() {
           <h1 className="text-2xl font-bold tracking-tight">Prescriptions</h1>
           <p className="text-sm text-muted-foreground">Review, approve and track prescription dispensing</p>
         </div>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <Plus className="h-4 w-4" /> Register Prescription
-        </Button>
+        {can('prescriptions:create') && (
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4" /> Register Prescription
+          </Button>
+        )}
       </div>
 
       {/* Stats — each card is a filter for its tab; the ACTIVE tab's card is the

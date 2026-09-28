@@ -22,6 +22,7 @@ import { InviteUserDialog } from '@/components/users/invite-user-dialog';
 import { cn } from '@/lib/utils';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 import type { Role } from '@pharmaos/types';
 
 async function fetchUsers(): Promise<User[]> {
@@ -59,6 +60,7 @@ function exportCSV(data: User[]) {
 
 export function UsersView() {
   const router = useRouter();
+  const can = useCan();
   const qc = useQueryClient();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [lockTarget, setLockTarget] = useState<User | null>(null);
@@ -198,28 +200,29 @@ export function UsersView() {
     {
       id: 'actions',
       header: '',
-      cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => openEdit(row.original)}><Edit className="h-4 w-4" /> Edit User</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => resetMutation.mutate(row.original)}>
-              Reset Password
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => mfaMutation.mutate(row.original)}>
-              {row.original.mfaEnabled ? 'Disable MFA' : 'Enable MFA'}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem destructive onClick={() => setLockTarget(row.original)}>
-              {row.original.status === 'locked'
-                ? <><Unlock className="h-4 w-4" /> Unlock Account</>
-                : <><Lock className="h-4 w-4" /> Lock Account</>}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
+      cell: ({ row }) =>
+        can('users:edit') ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => openEdit(row.original)}><Edit className="h-4 w-4" /> Edit User</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => resetMutation.mutate(row.original)}>
+                Reset Password
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => mfaMutation.mutate(row.original)}>
+                {row.original.mfaEnabled ? 'Disable MFA' : 'Enable MFA'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem destructive onClick={() => setLockTarget(row.original)}>
+                {row.original.status === 'locked'
+                  ? <><Unlock className="h-4 w-4" /> Unlock Account</>
+                  : <><Lock className="h-4 w-4" /> Lock Account</>}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null,
     },
   ];
 
@@ -234,12 +237,16 @@ export function UsersView() {
           <Button variant="outline" size="sm" onClick={() => exportCSV(data)}>
             <Download className="h-4 w-4" /> Export CSV
           </Button>
-          <Button variant="outline" size="sm" onClick={() => router.push('/roles')}>
-            <Shield className="h-4 w-4" /> Manage Roles
-          </Button>
-          <Button size="sm" onClick={() => setInviteOpen(true)}>
-            <UserPlus className="h-4 w-4" /> Invite User
-          </Button>
+          {can('users:edit') && (
+            <Button variant="outline" size="sm" onClick={() => router.push('/roles')}>
+              <Shield className="h-4 w-4" /> Manage Roles
+            </Button>
+          )}
+          {can('users:create') && (
+            <Button size="sm" onClick={() => setInviteOpen(true)}>
+              <UserPlus className="h-4 w-4" /> Invite User
+            </Button>
+          )}
         </div>
       </div>
 

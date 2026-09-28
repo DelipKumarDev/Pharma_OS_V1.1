@@ -83,12 +83,9 @@ export const MENU_GROUPS: MenuGroup[] = [
       { label: 'Financial', href: '/reports?tab=profit', icon: 'IndianRupee', perm: 'reports:view' },
       { label: 'GST', href: '/reports?tab=gst', icon: 'Percent', perm: 'reports:view' },
       { label: 'Customer Insights', href: '/reports?tab=customers', icon: 'Users', perm: 'reports:view' },
-      // These duplicate the Procurement/Inventory pages; keep the whole Reports
-      // section gated on reports:view (the pages remain reachable via their own
-      // groups for users with inventory:view). Route-guard perms come from the
-      // canonical (first) mapping in Procurement/Inventory, not these.
-      { label: 'Purchase', href: '/purchase-orders', icon: 'Truck', perm: 'reports:view' },
-      { label: 'Expiry', href: '/expiry', icon: 'CalendarX2', perm: 'reports:view' },
+      // Note: Purchase Orders and Expiry Monitor are NOT duplicated here — they
+      // live under Procurement and Inventory respectively. Reports links only to
+      // the analytics tabs of /reports to avoid two nav entries for one page.
     ],
   },
   {

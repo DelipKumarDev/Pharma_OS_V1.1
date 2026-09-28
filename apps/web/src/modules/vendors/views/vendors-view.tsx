@@ -28,6 +28,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 async function fetchVendorStats(): Promise<VendorStats> {
   const res = await apiFetch('/api/vendors/stats');
@@ -399,6 +400,7 @@ function RecordPaymentDialog({ vendor, open, onOpenChange }: { vendor: Vendor | 
 
 export function VendorsView() {
   const router = useRouter();
+  const can = useCan();
   const [addOpen, setAddOpen] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -574,12 +576,16 @@ export function VendorsView() {
           <Button variant="outline" size="sm" onClick={exportCSV}>
             <Download className="h-4 w-4" /> Export
           </Button>
-          <Button variant="outline" size="sm" onClick={() => router.push('/scan')}>
-            <Upload className="h-4 w-4" /> Upload Invoice
-          </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" /> Add Vendor
-          </Button>
+          {can('vendors:create') && (
+            <Button variant="outline" size="sm" onClick={() => router.push('/scan')}>
+              <Upload className="h-4 w-4" /> Upload Invoice
+            </Button>
+          )}
+          {can('vendors:create') && (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" /> Add Vendor
+            </Button>
+          )}
         </div>
       </div>
 

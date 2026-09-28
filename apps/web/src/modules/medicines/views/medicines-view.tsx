@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AddMedicineDialog } from '@/components/medicines/add-medicine-dialog';
 import { apiFetch } from '@/lib/api';
 import { useDropdown } from '@/lib/dropdowns';
+import { useCan } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 
 async function fetchMedicines(search: string, category: string): Promise<Medicine[]> {
@@ -50,6 +51,7 @@ function exportExcel(data: Medicine[], rxOf: (m: Medicine) => boolean) {
 }
 
 export function MedicinesView() {
+  const can = useCan();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [form, setForm] = useState('all');
@@ -217,22 +219,27 @@ export function MedicinesView() {
             <DropdownMenuItem onClick={() => setViewMedicine(row.original)}>
               <Eye className="h-4 w-4" /> View Details
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setEditMedicine(row.original)}>
-              <Edit className="h-4 w-4" /> Edit
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {row.original.status === 'discontinued' ? (
-              <DropdownMenuItem onClick={() => reactivateMutation.mutate(row.original.id)}>
-                <RotateCcw className="h-4 w-4" /> Reactivate
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onClick={() => setDiscontinueTarget(row.original)}>
-                <XCircle className="h-4 w-4" /> Discontinue
+            {can('medicines:edit') && (
+              <DropdownMenuItem onClick={() => setEditMedicine(row.original)}>
+                <Edit className="h-4 w-4" /> Edit
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem destructive onClick={() => setDeleteTarget(row.original)}>
-              <Trash2 className="h-4 w-4" /> Delete permanently
-            </DropdownMenuItem>
+            {can('medicines:edit') && <DropdownMenuSeparator />}
+            {can('medicines:edit') &&
+              (row.original.status === 'discontinued' ? (
+                <DropdownMenuItem onClick={() => reactivateMutation.mutate(row.original.id)}>
+                  <RotateCcw className="h-4 w-4" /> Reactivate
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => setDiscontinueTarget(row.original)}>
+                  <XCircle className="h-4 w-4" /> Discontinue
+                </DropdownMenuItem>
+              ))}
+            {can('medicines:delete') && (
+              <DropdownMenuItem destructive onClick={() => setDeleteTarget(row.original)}>
+                <Trash2 className="h-4 w-4" /> Delete permanently
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -247,12 +254,16 @@ export function MedicinesView() {
           <p className="text-sm text-muted-foreground">Manage all medicines, generics, and formulations</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => exportExcel(filtered, isRx)}>
-            <Download className="h-4 w-4" /> Export Excel
-          </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" /> Add Medicine
-          </Button>
+          {can('medicines:export') && (
+            <Button variant="outline" size="sm" onClick={() => exportExcel(filtered, isRx)}>
+              <Download className="h-4 w-4" /> Export Excel
+            </Button>
+          )}
+          {can('medicines:create') && (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" /> Add Medicine
+            </Button>
+          )}
         </div>
       </div>
 

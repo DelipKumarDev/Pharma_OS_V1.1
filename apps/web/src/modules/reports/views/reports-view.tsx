@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 import { markDayClosed, postDayClose, fetchDayCloseHistory } from '@/lib/day-close';
 import { useAuthStore } from '@/store/auth-store';
 
@@ -986,6 +987,7 @@ function CashReconciliationTab({ data, loading }: { data?: ReportsData; loading:
 
 export function ReportsView() {
   const router = useRouter();
+  const can = useCan();
   const searchParams = useSearchParams();
   // Default the analytics window to Today (Divya R187) — the owner can widen it.
   const [days, setDays] = useState(1);
@@ -1054,9 +1056,11 @@ export function ReportsView() {
           <p className="text-sm text-muted-foreground">Sales intelligence, GST compliance, stock health and customer insights</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportCSV} disabled={!data}>
-            <FileSpreadsheet className="h-4 w-4" /> Export CSV
-          </Button>
+          {can('reports:export') && (
+            <Button variant="outline" size="sm" onClick={exportCSV} disabled={!data}>
+              <FileSpreadsheet className="h-4 w-4" /> Export CSV
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={printReport} disabled={!data}>
             <FileText className="h-4 w-4" /> Print
           </Button>

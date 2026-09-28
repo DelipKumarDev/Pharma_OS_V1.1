@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -328,6 +329,7 @@ function ReceivePODialog({ po, onClose }: { po: PurchaseOrder | null; onClose: (
 
 export function PurchaseOrdersView() {
   const qc = useQueryClient();
+  const can = useCan();
   const [createOpen, setCreateOpen] = useState(false);
   const [prefill, setPrefill] = useState<DraftLine | null>(null);
   const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null);
@@ -426,9 +428,11 @@ export function PurchaseOrdersView() {
           <h1 className="text-2xl font-bold tracking-tight">Purchase Orders</h1>
           <p className="text-sm text-muted-foreground">Order stock from vendors and receive it into inventory</p>
         </div>
-        <Button size="sm" onClick={() => { setPrefill(null); setCreateOpen(true); }}>
-          <Plus className="h-4 w-4" /> New Purchase Order
-        </Button>
+        {can('inventory:create') && (
+          <Button size="sm" onClick={() => { setPrefill(null); setCreateOpen(true); }}>
+            <Plus className="h-4 w-4" /> New Purchase Order
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

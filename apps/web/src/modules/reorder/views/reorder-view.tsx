@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 import { exportToExcel } from '@/lib/export';
 
 async function fetchReorderStats(): Promise<ReorderStats> {
@@ -60,6 +61,7 @@ const PRIORITY_CONFIG = {
 const RELIABILITY_ICON = { excellent: '★★★★★', good: '★★★★☆', average: '★★★☆☆', poor: '★★☆☆☆' };
 
 function ReorderCard({ item, onOrder, onDismiss }: { item: ReorderItem; onOrder: (id: string) => void; onDismiss: (id: string) => void }) {
+  const canEdit = useCan()('inventory:edit');
   const [expanded, setExpanded] = useState(false);
   const config = PRIORITY_CONFIG[item.priority];
   const PriorityIcon = config.icon;
@@ -135,12 +137,12 @@ function ReorderCard({ item, onOrder, onDismiss }: { item: ReorderItem; onOrder:
         </div>
 
         <div className="flex flex-col gap-2 shrink-0">
-          {item.status !== 'ordered' && (
+          {canEdit && item.status !== 'ordered' && (
             <Button size="sm" onClick={() => onOrder(item.id)} className="whitespace-nowrap">
               <ShoppingCart className="h-3.5 w-3.5" /> Order Now
             </Button>
           )}
-          {item.status === 'ordered' && (
+          {canEdit && item.status === 'ordered' && (
             <Button size="sm" variant="outline" onClick={() => onDismiss(item.id)}>
               <CheckCircle2 className="h-3.5 w-3.5" /> Mark Received
             </Button>
@@ -187,6 +189,7 @@ function ReorderCard({ item, onOrder, onDismiss }: { item: ReorderItem; onOrder:
 }
 
 function AlertCard({ alert, onAcknowledge }: { alert: ReorderAlert; onAcknowledge: (id: string) => void }) {
+  const canEdit = useCan()('inventory:edit');
   const alertColors = { critical: 'border-destructive/40 bg-destructive/5', warning: 'border-warning-300 bg-warning/5', info: 'border-border bg-muted/30' };
   const alertIcons = { critical: <Zap className="h-4 w-4 text-destructive" />, warning: <AlertTriangle className="h-4 w-4 text-warning-600" />, info: <Bell className="h-4 w-4 text-muted-foreground" /> };
   const typeLabels: Record<string, string> = { out_of_stock: 'Out of Stock', critical_stock: 'Critical Stock', low_stock: 'Low Stock', expiry_risk: 'Expiry Risk' };
@@ -205,9 +208,11 @@ function AlertCard({ alert, onAcknowledge }: { alert: ReorderAlert; onAcknowledg
           <p className="text-xs text-muted-foreground">Current: {alert.currentQty} units · Threshold: {alert.threshold} units</p>
         </div>
       </div>
-      <Button size="sm" variant="ghost" onClick={() => onAcknowledge(alert.id)} className="text-xs shrink-0">
-        <CheckCircle2 className="h-3.5 w-3.5" /> Acknowledge
-      </Button>
+      {canEdit && (
+        <Button size="sm" variant="ghost" onClick={() => onAcknowledge(alert.id)} className="text-xs shrink-0">
+          <CheckCircle2 className="h-3.5 w-3.5" /> Acknowledge
+        </Button>
+      )}
     </div>
   );
 }

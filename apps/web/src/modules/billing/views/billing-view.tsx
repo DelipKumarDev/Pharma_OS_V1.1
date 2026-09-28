@@ -25,6 +25,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth-store';
 import { apiFetch } from '@/lib/api';
 import { useDropdown } from '@/lib/dropdowns';
+import { useCan } from '@/lib/permissions';
 import { isOnline, getCatalog, cacheCatalog, enqueueOp } from '@/lib/offline';
 import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -697,6 +698,7 @@ export function BillingView() {
   // enabled methods appear here; if the current selection is disabled, fall to the
   // first available one.
   const paymentMethods = useDropdown('paymentMethod');
+  const can = useCan();
   const [payMethod, setPayMethod] = useState<string>(paymentMethods[0] ?? 'cash');
   useEffect(() => {
     if (paymentMethods.length && !paymentMethods.includes(payMethod)) setPayMethod(paymentMethods[0]!);
@@ -1494,7 +1496,7 @@ export function BillingView() {
                 <Button variant="outline" size="sm" className="flex-1 gap-1 text-xs" onClick={handleHold}>
                   <Clock className="h-3.5 w-3.5" /> F4 Hold
                 </Button>
-                <Button size="sm" className="flex-[2] gap-1.5 font-semibold text-xs" onClick={handlePay} disabled={mutation.isPending || items.length === 0}>
+                <Button size="sm" className="flex-[2] gap-1.5 font-semibold text-xs" onClick={handlePay} disabled={mutation.isPending || items.length === 0 || !can('billing:create')} title={!can('billing:create') ? 'You do not have permission to create bills' : undefined}>
                   {mutation.isPending
                     ? <Loader2 className="h-4 w-4 animate-spin" />
                     : <><Printer className="h-3.5 w-3.5" /> F9 Pay{items.length > 0 && ` · ${formatCurrency(total)}`}</>
@@ -1532,6 +1534,7 @@ export function BillingView() {
 
 function BillHistory({ onNewBill }: { onNewBill: () => void }) {
   const router = useRouter();
+  const can = useCan();
   const { user } = useAuthStore();
   const [viewBill, setViewBill] = useState<Bill | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['billing'], queryFn: fetchBills });
@@ -1650,9 +1653,11 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
           <Button variant="outline" size="sm" onClick={() => exportCSV(data)}>
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
-          <Button size="sm" onClick={onNewBill}>
-            <Receipt className="h-3.5 w-3.5" /> New Bill
-          </Button>
+          {can('billing:create') && (
+            <Button size="sm" onClick={onNewBill}>
+              <Receipt className="h-3.5 w-3.5" /> New Bill
+            </Button>
+          )}
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -1730,9 +1735,11 @@ function BillHistory({ onNewBill }: { onNewBill: () => void }) {
               <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => doPrint(viewBill)}>
                 <Printer className="h-3.5 w-3.5" /> Print Receipt
               </Button>
-              <Button size="sm" variant="destructive" className="flex-1 gap-1.5" onClick={() => { setViewBill(null); router.push(`/returns?billId=${viewBill.id}&billNumber=${encodeURIComponent(viewBill.billNumber)}`); }}>
-                Process Return
-              </Button>
+              {can('returns:create') && (
+                <Button size="sm" variant="destructive" className="flex-1 gap-1.5" onClick={() => { setViewBill(null); router.push(`/returns?billId=${viewBill.id}&billNumber=${encodeURIComponent(viewBill.billNumber)}`); }}>
+                  Process Return
+                </Button>
+              )}
             </div>
           </div>
         )}

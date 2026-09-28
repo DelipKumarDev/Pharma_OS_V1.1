@@ -19,6 +19,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 import { useRefillMessage, openWhatsApp } from '@/lib/reminder';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -264,6 +265,7 @@ const VENDOR_STATUS: Record<string, { label: string; variant: 'success' | 'muted
 
 export function ContactsView() {
   const router = useRouter();
+  const can = useCan();
   const [tab, setTab] = useState<'customers' | 'vendors' | 'refills'>('customers');
 
   const { data: customers = [], isLoading: custLoading } = useQuery({
@@ -347,7 +349,7 @@ export function ContactsView() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => router.push('/customers')}><Eye className="h-4 w-4" /> View / Manage</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/billing')}><ShoppingBag className="h-4 w-4" /> New Bill</DropdownMenuItem>
+            {can('billing:create') && <DropdownMenuItem onClick={() => router.push('/billing')}><ShoppingBag className="h-4 w-4" /> New Bill</DropdownMenuItem>}
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -448,10 +450,12 @@ export function ContactsView() {
           <h1 className="text-2xl font-bold tracking-tight">Contacts</h1>
           <p className="text-sm text-muted-foreground">Manage customers and suppliers in one place</p>
         </div>
-        <Button size="sm" onClick={() => router.push(tab === 'customers' ? '/customers' : '/vendors')}>
-          <Plus className="h-4 w-4" />
-          {tab === 'customers' ? 'Add Customer' : 'Add Vendor'}
-        </Button>
+        {can(tab === 'customers' ? 'customers:create' : 'vendors:create') && (
+          <Button size="sm" onClick={() => router.push(tab === 'customers' ? '/customers' : '/vendors')}>
+            <Plus className="h-4 w-4" />
+            {tab === 'customers' ? 'Add Customer' : 'Add Vendor'}
+          </Button>
+        )}
       </div>
 
       {/* Stats */}

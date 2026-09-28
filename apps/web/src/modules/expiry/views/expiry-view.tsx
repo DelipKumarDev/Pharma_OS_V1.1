@@ -15,6 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 import { exportToExcel } from '@/lib/export';
 
 // The inventory API returns medicine fields flat (medicineName / dosageForm),
@@ -52,6 +53,7 @@ function exportExpiryExcel(data: InventoryItem[], label: string) {
 export function ExpiryView() {
   const qc = useQueryClient();
   const router = useRouter();
+  const can = useCan();
   const [disposeTarget, setDisposeTarget] = useState<InventoryItem | null>(null);
   const [returnTarget, setReturnTarget] = useState<InventoryItem | null>(null);
   const [discountTarget, setDiscountTarget] = useState<InventoryItem | null>(null);
@@ -220,6 +222,7 @@ export function ExpiryView() {
           // Already-expired stock cannot be sold, so a clearance Discount makes no
           // sense — only Return / Dispose apply. Discount is for near-expiry only.
           const isExpired = daysUntilExpiry(row.original.expiryDate) < 0;
+          if (!can('inventory:edit')) return <span className="text-xs text-muted-foreground">—</span>;
           return (
             <div className="flex items-center gap-1">
               <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setReturnTarget(row.original)}>
@@ -323,7 +326,7 @@ export function ExpiryView() {
                 <XCircle className="h-4 w-4 text-destructive" />
                 <p className="text-sm font-medium text-destructive">{expired.length} batches expired — Value at risk: {formatCurrency(expiredValue)}</p>
               </div>
-              <Button variant="destructive" size="sm" onClick={() => setBulkDispose(true)}>Bulk Dispose</Button>
+              {can('inventory:edit') && <Button variant="destructive" size="sm" onClick={() => setBulkDispose(true)}>Bulk Dispose</Button>}
             </div>
           )}
           <DataTable columns={buildColumns(false)} data={expired} loading={isLoading} globalSearch searchPlaceholder="Search expired items…" emptyMessage="No expired items" emptyDescription="Great! No batches have expired." />

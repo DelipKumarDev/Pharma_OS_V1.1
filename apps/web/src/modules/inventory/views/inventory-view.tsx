@@ -27,6 +27,7 @@ import { BatchDetailSheet } from '@/components/inventory/batch-detail-sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 const CATEGORY_TABS = [
   { label: 'All', value: 'all' },
@@ -104,6 +105,7 @@ const AI_INSIGHT_COLORS: Record<string, string> = {
 
 export function InventoryView() {
   const router = useRouter();
+  const can = useCan();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -278,9 +280,11 @@ export function InventoryView() {
               <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => setAdjustItem(row.original)}>
-                <Edit2 className="h-4 w-4" /> Adjust Stock
-              </DropdownMenuItem>
+              {can('inventory:edit') && (
+                <DropdownMenuItem onClick={() => setAdjustItem(row.original)}>
+                  <Edit2 className="h-4 w-4" /> Adjust Stock
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => setBatchItem(row.original)}>
                 <Layers className="h-4 w-4" /> View All Batches
               </DropdownMenuItem>
@@ -335,13 +339,13 @@ export function InventoryView() {
   }
 
   const QUICK_ACTIONS = [
-    { label: 'Add Medicine', icon: Plus, onClick: () => router.push('/medicines') },
-    { label: 'Add Batch', icon: Package, onClick: () => setAddOpen(true) },
-    { label: 'Stock Adjustment', icon: Edit2, onClick: () => toast.info('Select a medicine from the table, then use the ⋯ menu → Adjust Stock') },
-    { label: 'Stock Transfer', icon: Layers, onClick: () => router.push('/stock?tab=inventory') },
-    { label: 'Purchase Order', icon: RefreshCw, onClick: () => router.push('/vendors') },
-    { label: 'Print Labels', icon: Printer, onClick: printInventoryLabels },
-  ];
+    { label: 'Add Medicine', icon: Plus, onClick: () => router.push('/medicines'), perm: 'medicines:create' },
+    { label: 'Add Batch', icon: Package, onClick: () => setAddOpen(true), perm: 'inventory:create' },
+    { label: 'Stock Adjustment', icon: Edit2, onClick: () => toast.info('Select a medicine from the table, then use the ⋯ menu → Adjust Stock'), perm: 'inventory:edit' },
+    { label: 'Stock Transfer', icon: Layers, onClick: () => router.push('/stock?tab=inventory'), perm: 'inventory:edit' },
+    { label: 'Purchase Order', icon: RefreshCw, onClick: () => router.push('/vendors'), perm: 'vendors:view' },
+    { label: 'Print Labels', icon: Printer, onClick: printInventoryLabels, perm: undefined as string | undefined },
+  ].filter((a) => !a.perm || can(a.perm));
 
   return (
     <div className="flex h-full gap-4">
@@ -357,9 +361,11 @@ export function InventoryView() {
             <Button variant="outline" size="sm" onClick={() => exportCSV(data)}>
               <Download className="h-4 w-4" /> Export
             </Button>
-            <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" /> Add Batch
-            </Button>
+            {can('inventory:create') && (
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <Plus className="h-4 w-4" /> Add Batch
+              </Button>
+            )}
             <Button
               variant={cartOpen ? 'default' : 'outline'}
               size="sm"
