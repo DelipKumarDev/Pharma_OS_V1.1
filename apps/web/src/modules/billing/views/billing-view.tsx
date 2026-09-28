@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth-store';
 import { apiFetch } from '@/lib/api';
+import { useDropdown } from '@/lib/dropdowns';
 import { isOnline, getCatalog, cacheCatalog, enqueueOp } from '@/lib/offline';
 import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -692,7 +693,14 @@ export function BillingView() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [doctor, setDoctor] = useState('');
-  const [payMethod, setPayMethod] = useState<'cash' | 'upi' | 'card' | 'credit'>('cash');
+  // Payment methods are admin-configurable (Settings → Dropdown Options). Only the
+  // enabled methods appear here; if the current selection is disabled, fall to the
+  // first available one.
+  const paymentMethods = useDropdown('paymentMethod');
+  const [payMethod, setPayMethod] = useState<string>(paymentMethods[0] ?? 'cash');
+  useEffect(() => {
+    if (paymentMethods.length && !paymentMethods.includes(payMethod)) setPayMethod(paymentMethods[0]!);
+  }, [paymentMethods, payMethod]);
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [cashTendered, setCashTendered] = useState('');
 
@@ -1413,8 +1421,8 @@ export function BillingView() {
               </div>
 
               {/* Payment method */}
-              <div className="grid grid-cols-4 gap-1.5">
-                {(['cash', 'upi', 'card', 'credit'] as const).map((m) => (
+              <div className={cn('grid gap-1.5', paymentMethods.length <= 4 ? 'grid-cols-4' : 'grid-cols-3')}>
+                {paymentMethods.map((m) => (
                   <button key={m} onClick={() => setPayMethod(m)} className={cn(
                     'rounded-lg py-2 text-xs font-semibold uppercase tracking-wide border transition-all',
                     payMethod === m

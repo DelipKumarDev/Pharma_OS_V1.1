@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 const MODULES = [
   { key: 'medicines', label: 'Medicine Master', icon: '💊' },
@@ -79,6 +80,7 @@ export function RolesView() {
   const [newDesc, setNewDesc] = useState('');
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
 
+  const can = useCan();
   const { data: roles = [], isLoading } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
   const { data: permCatalog = [] } = useQuery({ queryKey: ['permissions'], queryFn: fetchPermissions });
 
@@ -150,9 +152,9 @@ export function RolesView() {
           <h1 className="text-2xl font-bold tracking-tight">Roles & Permissions</h1>
           <p className="text-sm text-muted-foreground">Manage staff roles and their access control across modules</p>
         </div>
-        <Button size="sm" onClick={openCreate}>
+        {can('users:create') && <Button size="sm" onClick={openCreate}>
           <Plus className="h-4 w-4" /> Create Role
-        </Button>
+        </Button>}
       </div>
 
       {/* Roles grid */}
@@ -174,7 +176,7 @@ export function RolesView() {
                   )}
                 </div>
               </div>
-              {!role.isSystem && (
+              {!role.isSystem && can('users:edit') && (
                 <div className="flex items-center gap-0.5">
                   <button onClick={() => openEdit(role)} className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary" title="Edit role">
                     <Pencil className="h-4 w-4" />
