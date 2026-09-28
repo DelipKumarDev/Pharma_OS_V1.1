@@ -1221,6 +1221,7 @@ export function SettingsView() {
   // Select the array itself (stable ref) — never `?? []` inside the selector, or
   // Zustand returns a new array each render → infinite update loop.
   const permissions = useAuthStore((s) => s.user?.permissions);
+  const patchUser = useAuthStore((s) => s.patchUser);
   const isAdmin = !!permissions && (permissions.includes('settings:edit') || permissions.includes('users:view'));
 
   const { data, isLoading } = useQuery({ queryKey: ['settings'], queryFn: fetchSettings });

@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { getInitials } from '@/lib/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { MENU_GROUPS, MENU_DASHBOARD } from '@/lib/menu-tree';
+import { MENU_GROUPS, MENU_DASHBOARD, hasMenuPerm } from '@/lib/menu-tree';
 
 /* ── Pharma Ist brand mark (swap public/logo-mark.png for the official asset) ── */
 function BrandMark({ className }: { className?: string }) {
@@ -28,7 +28,7 @@ function BrandMark({ className }: { className?: string }) {
   return <img src="/logo-mark.png" alt="Pharma Ist" className={className ?? 'h-full w-full'} />;
 }
 
-interface Leaf { label: string; href: string; icon: React.ElementType; }
+interface Leaf { label: string; href: string; icon: React.ElementType; perm?: string; }
 interface Group { label: string; icon: React.ElementType; items: Leaf[]; }
 
 // Resolve the shared menu-tree's string icon names to lucide components, so the
@@ -49,7 +49,7 @@ const DASHBOARD: Leaf = { label: MENU_DASHBOARD.label, href: MENU_DASHBOARD.href
 const GROUPS: Group[] = MENU_GROUPS.map((g) => ({
   label: g.label,
   icon: icon(g.icon),
-  items: g.items.map((l) => ({ label: l.label, href: l.href, icon: icon(l.icon) })),
+  items: g.items.map((l) => ({ label: l.label, href: l.href, icon: icon(l.icon), perm: l.perm })),
 }));
 
 // Match a leaf to the current route. For leaves that carry a ?tab= (e.g. the
@@ -74,17 +74,19 @@ export function Sidebar() {
   const { user, tokens, clearAuth } = useAuthStore();
   const queryClient = useQueryClient();
 
-  // Apply per-role menu visibility (configured in Administration → Access
-  // Control, resolved server-side into user.menuHidden). Hidden leaves are
-  // dropped; a group with no remaining leaves disappears entirely.
+  // Two independent visibility filters:
+  //  1. RBAC — hide any leaf whose required permission the user lacks (the user's
+  //     permissions come from their roles, resolved server-side into user.permissions).
+  //  2. Admin Access-Control — hide leaves an admin turned off per-role (user.menuHidden).
+  // A group with no remaining leaves disappears entirely.
   const menuHidden = user?.menuHidden;
+  const permissions = user?.permissions;
   const groups = React.useMemo(() => {
     const hidden = new Set(menuHidden ?? []);
-    if (hidden.size === 0) return GROUPS;
     return GROUPS
-      .map((g) => ({ ...g, items: g.items.filter((l) => !hidden.has(l.href)) }))
+      .map((g) => ({ ...g, items: g.items.filter((l) => hasMenuPerm(permissions, l.perm) && !hidden.has(l.href)) }))
       .filter((g) => g.items.length > 0);
-  }, [menuHidden]);
+  }, [menuHidden, permissions]);
 
   // Accordion: at most one group open at a time. Auto-open the group that
   // contains the active route (collapsing any other) when the route changes.

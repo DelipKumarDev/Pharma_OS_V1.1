@@ -75,7 +75,7 @@ export function EditStockDialog({ item, open, onOpenChange }: Props) {
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Edit Stock Entry</DialogTitle>
-          <DialogDescription>{item?.medicineName} — batch {item?.batchNumber}. To change quantity, use Adjust Stock.</DialogDescription>
+          <DialogDescription>{(item as (typeof item) & { medicineName?: string })?.medicineName ?? item?.medicine?.name} — batch {item?.batchNumber}. To change quantity, use Adjust Stock.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit((v) => mutation.mutate(v))} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
