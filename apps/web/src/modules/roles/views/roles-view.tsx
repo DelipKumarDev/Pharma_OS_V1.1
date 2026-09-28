@@ -16,16 +16,30 @@ import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
 import { useCan } from '@/lib/permissions';
 
-const MODULES = [
-  { key: 'medicines', label: 'Medicine Master', icon: '💊' },
-  { key: 'inventory', label: 'Inventory', icon: '📦' },
-  { key: 'billing', label: 'Billing', icon: '🧾' },
-  { key: 'reports', label: 'Reports', icon: '📊' },
-  { key: 'users', label: 'User Management', icon: '👥' },
-  { key: 'settings', label: 'Settings', icon: '⚙️' },
-];
+// Display metadata + preferred ordering. The actual module/action list shown is
+// derived from the live permission catalog (see `modules`/`actions` below), so
+// every module the API enforces — customers, vendors, prescriptions, returns,
+// etc. — appears in the card, matrix, and role editor. Anything not in META
+// still renders with a humanized fallback label, so the UI can never silently
+// omit a module the backend knows about.
+const MODULE_META: Record<string, { label: string; icon: string }> = {
+  medicines: { label: 'Medicine Master', icon: '💊' },
+  inventory: { label: 'Inventory', icon: '📦' },
+  billing: { label: 'Billing', icon: '🧾' },
+  customers: { label: 'Customers', icon: '👤' },
+  vendors: { label: 'Vendors', icon: '🚚' },
+  prescriptions: { label: 'Prescriptions', icon: '📋' },
+  returns: { label: 'Returns', icon: '↩️' },
+  reports: { label: 'Reports', icon: '📊' },
+  users: { label: 'User Management', icon: '👥' },
+  settings: { label: 'Settings', icon: '⚙️' },
+};
+const MODULE_ORDER = ['medicines', 'inventory', 'billing', 'customers', 'vendors', 'prescriptions', 'returns', 'reports', 'users', 'settings'];
+const ACTION_ORDER = ['view', 'create', 'edit', 'delete', 'export', 'approve'] as const;
 
-const ACTIONS = ['view', 'create', 'edit', 'delete', 'export'] as const;
+function humanizeModule(key: string): string {
+  return MODULE_META[key]?.label ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 async function fetchRoles(): Promise<Role[]> {
   const res = await apiFetch('/api/roles');
@@ -89,6 +103,36 @@ export function RolesView() {
     () => new Map(permCatalog.map((p) => [`${p.module}:${p.action}`, p.id])),
     [permCatalog],
   );
+
+  // Modules/actions shown everywhere are derived from the live catalog (falling
+  // back to the full known set before the catalog loads), excluding the
+  // platform-operator permission which is never part of a pharmacy role.
+  const modules = React.useMemo(() => {
+    const present = permCatalog.length
+      ? new Set(permCatalog.map((p) => p.module).filter((m) => m !== 'platform'))
+      : new Set(MODULE_ORDER);
+    const ordered = [
+      ...MODULE_ORDER.filter((m) => present.has(m)),
+      ...[...present].filter((m) => !MODULE_ORDER.includes(m)).sort(),
+    ];
+    return ordered.map((key) => ({ key, label: humanizeModule(key), icon: MODULE_META[key]?.icon ?? '•' }));
+  }, [permCatalog]);
+
+  const actions = React.useMemo(() => {
+    const present = permCatalog.length ? new Set(permCatalog.map((p) => p.action)) : new Set<string>(ACTION_ORDER);
+    return ACTION_ORDER.filter((a) => present.has(a));
+  }, [permCatalog]);
+
+  // Which actions actually exist per module, so the editor only offers real
+  // permissions (e.g. no medicines:approve, no billing:export).
+  const actionsByModule = React.useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    permCatalog.forEach((p) => {
+      if (!m.has(p.module)) m.set(p.module, new Set());
+      m.get(p.module)!.add(p.action);
+    });
+    return m;
+  }, [permCatalog]);
 
   function openCreate() {
     setNewName(''); setNewDesc(''); setPermissions({}); setDialogRole('new');
@@ -195,7 +239,7 @@ export function RolesView() {
             <Separator className="my-3" />
 
             <div className="space-y-1.5">
-              {MODULES.map((mod) => {
+              {modules.map((mod) => {
                 const modPerms = role.permissions.filter((p) => p.module === mod.key);
                 if (modPerms.length === 0) return null;
                 return (
@@ -239,7 +283,7 @@ export function RolesView() {
               </tr>
             </thead>
             <tbody>
-              {MODULES.map((mod, mIdx) => (
+              {modules.map((mod, mIdx) => (
                 <tr key={mod.key} className={cn('border-b border-border', mIdx % 2 === 0 && 'bg-muted/10')}>
                   <td className="py-3 pl-5 font-medium">
                     <span className="mr-1.5">{mod.icon}</span>{mod.label}
@@ -292,15 +336,26 @@ export function RolesView() {
             <div>
               <Label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Permissions</Label>
               <div className="rounded-lg border border-border overflow-hidden">
-                <div className="grid grid-cols-[1fr,repeat(5,auto)] bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground gap-4">
+                <div
+                  className="grid bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground gap-4"
+                  style={{ gridTemplateColumns: `1fr repeat(${actions.length}, auto)` }}
+                >
                   <span>Module</span>
-                  {ACTIONS.map((a) => <span key={a} className="w-12 text-center capitalize">{a}</span>)}
+                  {actions.map((a) => <span key={a} className="w-12 text-center capitalize">{a}</span>)}
                 </div>
-                {MODULES.map((mod, idx) => (
-                  <div key={mod.key} className={cn('grid grid-cols-[1fr,repeat(5,auto)] items-center px-4 py-2 gap-4', idx % 2 === 0 ? 'bg-background' : 'bg-muted/10')}>
+                {modules.map((mod, idx) => (
+                  <div
+                    key={mod.key}
+                    className={cn('grid items-center px-4 py-2 gap-4', idx % 2 === 0 ? 'bg-background' : 'bg-muted/10')}
+                    style={{ gridTemplateColumns: `1fr repeat(${actions.length}, auto)` }}
+                  >
                     <span className="text-sm font-medium">{mod.icon} {mod.label}</span>
-                    {ACTIONS.map((action) => {
+                    {actions.map((action) => {
                       const key = `${mod.key}:${action}`;
+                      // Only offer a checkbox for actions this module actually has.
+                      if (!actionsByModule.get(mod.key)?.has(action)) {
+                        return <div key={action} className="w-12" />;
+                      }
                       const checked = !!permissions[key];
                       return (
                         <div key={action} className="flex w-12 justify-center">
