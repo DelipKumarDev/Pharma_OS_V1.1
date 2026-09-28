@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Circle, ArrowRight, Rocket, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useCan } from '@/lib/permissions';
 
 interface OnboardingState {
   profile: boolean;
@@ -33,21 +34,26 @@ async function fetchOnboarding(): Promise<OnboardingState> {
 const STORAGE_KEY = 'pharmaos_onboarding_dismissed';
 
 export function OnboardingChecklist() {
+  const can = useCan();
   const [dismissed, setDismissed] = React.useState(true);
   React.useEffect(() => { setDismissed(localStorage.getItem(STORAGE_KEY) === '1'); }, []);
 
   const { data } = useQuery({ queryKey: ['onboarding'], queryFn: fetchOnboarding, staleTime: 60_000 });
 
+  // `perm` is the permission required to REACH the step's destination — steps a
+  // user can't reach (e.g. the /settings setup steps for a Billing Assistant
+  // without settings:view) are filtered out so we never link them somewhere the
+  // route guard just bounces. If nothing actionable remains, the card hides.
   const steps = [
-    { key: 'profile', label: 'Set up pharmacy profile', desc: 'GST, drug license, address', href: '/settings?tab=profile', done: data?.profile },
-    { key: 'medicines', label: 'Add your medicines', desc: 'Manually or bulk-import from Excel', href: '/settings?tab=import', done: data?.medicines },
-    { key: 'stock', label: 'Add opening stock', desc: 'One-sheet import: medicines + batches together', href: '/settings?tab=import', done: data?.stock },
-    { key: 'firstBill', label: 'Create your first bill', desc: 'Ring up a sale at the POS', href: '/billing', done: data?.firstBill },
-  ];
+    { key: 'profile', label: 'Set up pharmacy profile', desc: 'GST, drug license, address', href: '/settings?tab=profile', done: data?.profile, perm: 'settings:view' },
+    { key: 'medicines', label: 'Add your medicines', desc: 'Manually or bulk-import from Excel', href: '/settings?tab=import', done: data?.medicines, perm: 'settings:view' },
+    { key: 'stock', label: 'Add opening stock', desc: 'One-sheet import: medicines + batches together', href: '/settings?tab=import', done: data?.stock, perm: 'settings:view' },
+    { key: 'firstBill', label: 'Create your first bill', desc: 'Ring up a sale at the POS', href: '/billing', done: data?.firstBill, perm: 'billing:view' },
+  ].filter((s) => can(s.perm));
   const doneCount = steps.filter((s) => s.done).length;
 
-  // Hide once fully set up, dismissed, or data not yet loaded.
-  if (!data || dismissed || doneCount === steps.length) return null;
+  // Hide once fully set up, dismissed, no actionable steps, or data not loaded.
+  if (!data || dismissed || steps.length === 0 || doneCount === steps.length) return null;
 
   function dismiss() { localStorage.setItem(STORAGE_KEY, '1'); setDismissed(true); }
 
