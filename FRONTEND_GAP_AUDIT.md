@@ -29,6 +29,14 @@
 
 ---
 
+## Runtime verification (2026-09-29, live browser)
+
+Drove the running app (web :3000 + api :4000) end-to-end:
+
+1. ✅ **Nav RBAC** — logged in as Billing Assistant (`billing@divyapharmacy.com`): sidebar showed **no Reports and no Compliance** groups; logged in as Pharma Admin: both groups present. Proves permission-driven nav.
+2. ✅ **Action RBAC** — Billing Assistant on `/medicines`: **no "Add Medicine" and no "Export Excel"** buttons (`hasAddMedicine:false, hasExportExcel:false`); Admin on `/customers`: "Add Customer" + "Export" present. Proves button-level gating both directions.
+3. ✅ **Form-field config live** — as Admin, Add Customer showed 9 fields incl. "Notes". Disabled "Notes" in Settings → Form Fields → Customer Profile, saved (no re-login), reopened Add Customer → **8 fields, "Notes" gone**; labels also updated ("Phone"→"Phone Number", "Email"→"Email Address"). Config-driven Customer Type showed "Walk-in". Then re-enabled Notes + saved to restore the tenant's baseline (9/9).
+
 ## Remaining gaps (concrete, prioritized)
 
 ### A. Hardcoded dropdowns — wire to `useDropdown(key)`
