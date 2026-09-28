@@ -89,11 +89,20 @@ export const MENU_GROUPS: MenuGroup[] = [
     ],
   },
   {
+    // Only real administrative pages live here, each permission-gated — so the
+    // whole "Administration" header only appears for users who actually have an
+    // admin permission (users:view / settings:view). Universal utilities moved
+    // to "Support" below so they don't keep this header visible for every role.
     label: 'Administration', icon: 'Settings2', items: [
       { label: 'Users', href: '/users', icon: 'UserCog', perm: 'users:view' },
       { label: 'Roles', href: '/roles', icon: 'Shield', perm: 'users:view' },
       { label: 'Permissions', href: '/permissions', icon: 'KeyRound', perm: 'users:view' },
       { label: 'Settings', href: '/settings', icon: 'Settings2', perm: 'settings:view' },
+    ],
+  },
+  {
+    // Universal, permission-less utilities available to every signed-in user.
+    label: 'Support', icon: 'HelpCircle', items: [
       { label: 'Notifications', href: '/notifications', icon: 'Bell' },
       { label: 'Help', href: '/help', icon: 'HelpCircle' },
       { label: 'Shortcuts', href: '/shortcuts', icon: 'Keyboard' },
