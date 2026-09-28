@@ -26,6 +26,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { apiFetch } from '@/lib/api';
 import { useDropdown } from '@/lib/dropdowns';
 import { useCan } from '@/lib/permissions';
+import { useFormFieldConfig } from '@/lib/form-fields';
 import { isOnline, getCatalog, cacheCatalog, enqueueOp } from '@/lib/offline';
 import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -699,6 +700,7 @@ export function BillingView() {
   // first available one.
   const paymentMethods = useDropdown('paymentMethod');
   const can = useCan();
+  const ff = useFormFieldConfig('billing');
   const [payMethod, setPayMethod] = useState<string>(paymentMethods[0] ?? 'cash');
   useEffect(() => {
     if (paymentMethods.length && !paymentMethods.includes(payMethod)) setPayMethod(paymentMethods[0]!);
@@ -1299,21 +1301,25 @@ export function BillingView() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="relative">
                   <User className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                  <Input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-8 text-xs pl-7" />
+                  <Input placeholder={ff.label('customerName', 'Customer name')} value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-8 text-xs pl-7" />
                 </div>
-                <Input
-                  placeholder="Phone number"
-                  inputMode="numeric"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  maxLength={10}
-                  className={cn('h-8 text-xs', phoneInvalid && 'border-destructive focus-visible:ring-destructive')}
-                />
+                {ff.isEnabled('customerPhone') && (
+                  <Input
+                    placeholder={ff.label('customerPhone', 'Phone number')}
+                    inputMode="numeric"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    maxLength={10}
+                    className={cn('h-8 text-xs', phoneInvalid && 'border-destructive focus-visible:ring-destructive')}
+                  />
+                )}
               </div>
               {phoneInvalid && (
                 <p className="mt-1 text-[10px] text-destructive font-medium">Phone number must be exactly 10 digits.</p>
               )}
-              <Input placeholder="Doctor name (for Rx)" value={doctor} onChange={(e) => setDoctor(e.target.value)} className="mt-1.5 h-8 text-xs" />
+              {ff.isEnabled('doctorName') && (
+                <Input placeholder={`${ff.label('doctorName', 'Doctor name')} (for Rx)`} value={doctor} onChange={(e) => setDoctor(e.target.value)} className="mt-1.5 h-8 text-xs" />
+              )}
               {items.some((i) => i.schedule && SCHEDULED_DRUGS.includes(i.schedule)) && (!customerName.trim() || !doctor.trim()) && (
                 <p className="mt-1.5 text-[10px] text-destructive font-medium bg-destructive/10 rounded px-2 py-1">
                   ⚠ Schedule H/H1/X drug in cart — patient name &amp; doctor name are mandatory
@@ -1395,12 +1401,14 @@ export function BillingView() {
             {/* Totals + payment */}
             <div className="shrink-0 border-t border-border px-4 pb-3 pt-2 space-y-2.5 bg-card">
               {/* Bill discount */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground flex-1">Bill discount %</span>
-                <input type="number" min={0} max={100} value={globalDiscount}
-                  onChange={(e) => setGlobalDiscount(Number(e.target.value))}
-                  className="w-16 h-6 text-xs border border-border rounded px-2 text-center bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-              </div>
+              {ff.isEnabled('globalDiscount') && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground flex-1">{ff.label('globalDiscount', 'Bill discount %')}</span>
+                  <input type="number" min={0} max={100} value={globalDiscount}
+                    onChange={(e) => setGlobalDiscount(Number(e.target.value))}
+                    className="w-16 h-6 text-xs border border-border rounded px-2 text-center bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                </div>
+              )}
 
               {/* Totals */}
               <div className="space-y-1 rounded-lg bg-muted/40 px-3 py-2 text-sm">

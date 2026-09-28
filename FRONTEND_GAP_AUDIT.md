@@ -25,6 +25,7 @@
 | **Action RBAC applied to 11 module views** — vendors, medicines, users, customers, prescriptions, returns, inventory, purchase-orders, reorder, expiry, billing, reports, contacts (Create/Edit/Delete/Approve/Export/Pay gated by `can('module:action')`) | _this batch_ | `tsc` clean |
 | **customerType dropdown config-driven** (`useDropdown('customerType')`) + registry aligned to app enum (was `wholesale/staff`, now `walk_in/regular/vip/credit`) + zod relaxed to `string` so custom types work | _this batch_ | `tsc` clean |
 | **Duplicates removed** — deleted dead `new-bill-sheet.tsx` (never imported); removed redundant Reports→Purchase and Reports→Expiry menu entries (duplicated Procurement/Inventory pages) | _this batch_ | grep: 0 refs |
+| **Form-field config honored in all 6 configurable forms** — billing (POS customer/discount), medicine, add-stock, customer, vendor, prescription now read `useFormFieldConfig(formId)` for show/require/label. Reconciled the `customer` and `prescription` field-ID registries to the forms' real field names (they didn't match, so toggles were dead) | _this batch_ | `tsc` clean |
 
 ---
 

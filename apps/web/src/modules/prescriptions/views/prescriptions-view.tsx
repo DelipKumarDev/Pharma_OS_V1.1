@@ -31,6 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
 import { useCan } from '@/lib/permissions';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -406,6 +407,7 @@ async function fileToStored(f: File): Promise<{ url: string; type: 'image' | 'pd
 
 function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
+  const ff = useFormFieldConfig('prescription');
   const { register, handleSubmit, reset, formState: { errors } } = useForm<AddFormValues>({
     mode: 'onTouched',
     resolver: zodResolver(addSchema),
@@ -517,12 +519,14 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <Input {...register('customerName')} className="mt-1 h-8 text-sm" placeholder="Full name" />
                 {errors.customerName && <p className="text-xs text-destructive mt-0.5">{errors.customerName.message}</p>}
               </div>
-              <div>
-                <Label className="text-xs">Phone</Label>
-                <Input {...register('customerPhone')} inputMode="numeric" className="mt-1 h-8 text-sm" placeholder="10-digit number" maxLength={10}
-                  onInput={(e) => { const t = e.target as HTMLInputElement; t.value = t.value.replace(/\D/g, '').slice(0, 10); }} />
-                {errors.customerPhone && <p className="text-xs text-destructive mt-0.5">{errors.customerPhone.message}</p>}
-              </div>
+              {ff.isEnabled('customerPhone') && (
+                <div>
+                  <Label className="text-xs">{ff.label('customerPhone', 'Phone')}</Label>
+                  <Input {...register('customerPhone')} inputMode="numeric" className="mt-1 h-8 text-sm" placeholder="10-digit number" maxLength={10}
+                    onInput={(e) => { const t = e.target as HTMLInputElement; t.value = t.value.replace(/\D/g, '').slice(0, 10); }} />
+                  {errors.customerPhone && <p className="text-xs text-destructive mt-0.5">{errors.customerPhone.message}</p>}
+                </div>
+              )}
             </div>
           </div>
 
@@ -535,14 +539,18 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <Input {...register('doctorName')} className="mt-1 h-8 text-sm" placeholder="Dr. Full Name" />
                 {errors.doctorName && <p className="text-xs text-destructive mt-0.5">{errors.doctorName.message}</p>}
               </div>
-              <div>
-                <Label className="text-xs">Reg. Number</Label>
-                <Input {...register('doctorRegNumber')} className="mt-1 h-8 text-sm" placeholder="MCI-XXXXX" />
-              </div>
-              <div>
-                <Label className="text-xs">Hospital / Clinic</Label>
-                <Input {...register('hospitalName')} className="mt-1 h-8 text-sm" placeholder="Hospital name" />
-              </div>
+              {ff.isEnabled('doctorRegNumber') && (
+                <div>
+                  <Label className="text-xs">{ff.label('doctorRegNumber', 'Reg. Number')}</Label>
+                  <Input {...register('doctorRegNumber')} className="mt-1 h-8 text-sm" placeholder="MCI-XXXXX" />
+                </div>
+              )}
+              {ff.isEnabled('hospitalName') && (
+                <div>
+                  <Label className="text-xs">{ff.label('hospitalName', 'Hospital / Clinic')}</Label>
+                  <Input {...register('hospitalName')} className="mt-1 h-8 text-sm" placeholder="Hospital name" />
+                </div>
+              )}
             </div>
           </div>
 
@@ -552,11 +560,13 @@ function AddRxSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               <Label className="text-xs">Prescription Date *</Label>
               <Input type="date" {...register('prescriptionDate')} className="mt-1 h-8 text-sm" />
             </div>
-            <div>
-              <Label className="text-xs">Valid Until</Label>
-              <Input type="date" min={new Date().toISOString().substring(0, 10)} {...register('validUntil')} className="mt-1 h-8 text-sm" />
-              {errors.validUntil && <p className="text-2xs text-destructive mt-1">{errors.validUntil.message}</p>}
-            </div>
+            {ff.isEnabled('validUntil') && (
+              <div>
+                <Label className="text-xs">{ff.label('validUntil', 'Valid Until')}</Label>
+                <Input type="date" min={new Date().toISOString().substring(0, 10)} {...register('validUntil')} className="mt-1 h-8 text-sm" />
+                {errors.validUntil && <p className="text-2xs text-destructive mt-1">{errors.validUntil.message}</p>}
+              </div>
+            )}
           </div>
 
           {/* Medicines */}

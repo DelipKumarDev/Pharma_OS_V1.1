@@ -28,6 +28,7 @@ import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { useDropdown } from '@/lib/dropdowns';
 import { useCan } from '@/lib/permissions';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 /** Turn a snake_case option into a human label, preferring the known TYPE_LABEL. */
 function customerTypeLabel(value: string): string {
@@ -98,6 +99,7 @@ const DEFAULT_TYPE_INFO: TypeInfo = { label: 'Regular', variant: 'success', icon
 function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const customerTypes = useDropdown('customerType');
+  const ff = useFormFieldConfig('customer');
   const { register, handleSubmit, reset, formState: { errors } } = useForm<CustomerFormValues>({ mode: 'onTouched', resolver: zodResolver(customerSchema) });
 
   const mutation = useMutation({
@@ -119,54 +121,68 @@ function AddCustomerDialog({ open, onOpenChange }: { open: boolean; onOpenChange
         <form onSubmit={handleSubmit(d => mutation.mutate(d))} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1">
-              <Label>Full Name <span className="text-destructive">*</span></Label>
+              <Label>{ff.label('name', 'Full Name')} <span className="text-destructive">*</span></Label>
               <Input {...register('name')} placeholder="Ramesh Gupta" />
               {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
             </div>
             <div className="space-y-1">
-              <Label>Phone <span className="text-destructive">*</span></Label>
+              <Label>{ff.label('phone', 'Phone')} <span className="text-destructive">*</span></Label>
               <Input {...register('phone')} placeholder="9876543210" />
               {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
-            <div className="space-y-1">
-              <Label>Email</Label>
-              <Input {...register('email')} placeholder="email@example.com" type="email" />
-              {errors.email && <p className="text-xs text-destructive">{errors.email.message || 'Enter a valid email'}</p>}
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label>Address</Label>
-              <Input {...register('address')} placeholder="Home or office address" />
-            </div>
-            <div className="space-y-1">
-              <Label>Date of Birth</Label>
-              <Input {...register('dateOfBirth')} type="date" max={new Date().toISOString().substring(0, 10)} />
-              {errors.dateOfBirth && <p className="text-2xs text-destructive">{errors.dateOfBirth.message}</p>}
-            </div>
-            <div className="space-y-1">
-              <Label>Gender</Label>
-              <select {...register('gender')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
-                <option value="">Select...</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label>Doctor Name</Label>
-              <Input {...register('doctorName')} placeholder="Dr. Anjali Singh" />
-            </div>
-            <div className="space-y-1">
-              <Label>Customer Type</Label>
-              <select {...register('customerType')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
-                {customerTypes.map((t) => (
-                  <option key={t} value={t}>{customerTypeLabel(t)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="col-span-2 space-y-1">
-              <Label>Notes</Label>
-              <Input {...register('notes')} placeholder="Any notes about this customer" />
-            </div>
+            {ff.isEnabled('email') && (
+              <div className="space-y-1">
+                <Label>{ff.label('email', 'Email')}{ff.isRequired('email') && <span className="text-destructive"> *</span>}</Label>
+                <Input {...register('email')} placeholder="email@example.com" type="email" />
+                {errors.email && <p className="text-xs text-destructive">{errors.email.message || 'Enter a valid email'}</p>}
+              </div>
+            )}
+            {ff.isEnabled('address') && (
+              <div className="col-span-2 space-y-1">
+                <Label>{ff.label('address', 'Address')}{ff.isRequired('address') && <span className="text-destructive"> *</span>}</Label>
+                <Input {...register('address')} placeholder="Home or office address" />
+              </div>
+            )}
+            {ff.isEnabled('dateOfBirth') && (
+              <div className="space-y-1">
+                <Label>{ff.label('dateOfBirth', 'Date of Birth')}{ff.isRequired('dateOfBirth') && <span className="text-destructive"> *</span>}</Label>
+                <Input {...register('dateOfBirth')} type="date" max={new Date().toISOString().substring(0, 10)} />
+                {errors.dateOfBirth && <p className="text-2xs text-destructive">{errors.dateOfBirth.message}</p>}
+              </div>
+            )}
+            {ff.isEnabled('gender') && (
+              <div className="space-y-1">
+                <Label>{ff.label('gender', 'Gender')}</Label>
+                <select {...register('gender')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+                  <option value="">Select...</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            )}
+            {ff.isEnabled('doctorName') && (
+              <div className="space-y-1">
+                <Label>{ff.label('doctorName', 'Doctor Name')}</Label>
+                <Input {...register('doctorName')} placeholder="Dr. Anjali Singh" />
+              </div>
+            )}
+            {ff.isEnabled('customerType') && (
+              <div className="space-y-1">
+                <Label>{ff.label('customerType', 'Customer Type')}</Label>
+                <select {...register('customerType')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+                  {customerTypes.map((t) => (
+                    <option key={t} value={t}>{customerTypeLabel(t)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {ff.isEnabled('notes') && (
+              <div className="col-span-2 space-y-1">
+                <Label>{ff.label('notes', 'Notes')}</Label>
+                <Input {...register('notes')} placeholder="Any notes about this customer" />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>Cancel</Button>

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Medicine, InventoryItem } from '@pharmaos/types';
 import { apiFetch } from '@/lib/api';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -67,6 +68,7 @@ async function addStock(data: FormValues): Promise<InventoryItem> {
 }
 
 export function AddStockSheet({ open, onOpenChange }: Props) {
+  const ff = useFormFieldConfig('inventory');
   const [search, setSearch] = useState('');
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -208,7 +210,7 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pricing</p>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
-                <Label>Purchase Price (₹)</Label>
+                <Label>{ff.label('purchasePrice', 'Purchase Price (₹)')}</Label>
                 <Input type="number" step="0.01" {...register('purchasePrice')} placeholder="0.00" />
                 {errors.purchasePrice && <p className="text-xs text-destructive">{errors.purchasePrice.message}</p>}
               </div>
@@ -234,15 +236,17 @@ export function AddStockSheet({ open, onOpenChange }: Props) {
           {/* Supplier + Rack Location */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>Supplier Name <span className="text-destructive">*</span></Label>
+              <Label>{ff.label('supplierName', 'Supplier Name')} <span className="text-destructive">*</span></Label>
               <Input {...register('supplierName')} placeholder="e.g. MedLine Distributors" />
               {errors.supplierName && <p className="text-xs text-destructive">{errors.supplierName.message}</p>}
             </div>
-            <div className="space-y-1">
-              <Label>Rack Location</Label>
-              <Input {...register('rackLocation')} placeholder="e.g. A-01-02" />
-              <p className="text-2xs text-muted-foreground">Format: [A-Z]-[00-99]-[00-99]</p>
-            </div>
+            {ff.isEnabled('rackLocation') && (
+              <div className="space-y-1">
+                <Label>{ff.label('rackLocation', 'Rack Location')}</Label>
+                <Input {...register('rackLocation')} placeholder="e.g. A-01-02" />
+                <p className="text-2xs text-muted-foreground">Format: [A-Z]-[00-99]-[00-99]</p>
+              </div>
+            )}
           </div>
         </form>
 

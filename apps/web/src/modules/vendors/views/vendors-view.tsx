@@ -29,6 +29,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { useCan } from '@/lib/permissions';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 async function fetchVendorStats(): Promise<VendorStats> {
   const res = await apiFetch('/api/vendors/stats');
@@ -85,6 +86,7 @@ type VendorFormValues = z.infer<typeof vendorSchema>;
 
 function AddVendorDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
+  const ff = useFormFieldConfig('vendor');
   const { register, handleSubmit, reset, formState: { errors } } = useForm<VendorFormValues>({ mode: 'onTouched', resolver: zodResolver(vendorSchema) });
 
   const mutation = useMutation({
@@ -117,19 +119,25 @@ function AddVendorDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
               <Input {...register('phone')} placeholder="9876543210" />
               {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
-            <div className="space-y-1">
-              <Label>Email</Label>
-              <Input {...register('email')} placeholder="orders@vendor.com" type="email" />
-              {errors.email && <p className="text-xs text-destructive">{errors.email.message || 'Enter a valid email'}</p>}
-            </div>
-            <div className="space-y-1">
-              <Label>GST Number</Label>
-              <Input {...register('gstNumber')} placeholder="27AABCU9603R1ZX" className="uppercase" />
-            </div>
-            <div className="space-y-1">
-              <Label>Contact Person</Label>
-              <Input {...register('contactPerson')} placeholder="Rajesh Sharma" />
-            </div>
+            {ff.isEnabled('email') && (
+              <div className="space-y-1">
+                <Label>{ff.label('email', 'Email')}{ff.isRequired('email') && <span className="text-destructive"> *</span>}</Label>
+                <Input {...register('email')} placeholder="orders@vendor.com" type="email" />
+                {errors.email && <p className="text-xs text-destructive">{errors.email.message || 'Enter a valid email'}</p>}
+              </div>
+            )}
+            {ff.isEnabled('gstNumber') && (
+              <div className="space-y-1">
+                <Label>{ff.label('gstNumber', 'GST Number')}{ff.isRequired('gstNumber') && <span className="text-destructive"> *</span>}</Label>
+                <Input {...register('gstNumber')} placeholder="27AABCU9603R1ZX" className="uppercase" />
+              </div>
+            )}
+            {ff.isEnabled('contactPerson') && (
+              <div className="space-y-1">
+                <Label>{ff.label('contactPerson', 'Contact Person')}</Label>
+                <Input {...register('contactPerson')} placeholder="Rajesh Sharma" />
+              </div>
+            )}
             <div className="col-span-2 space-y-1">
               <Label>Address <span className="text-destructive">*</span></Label>
               <Input {...register('address')} placeholder="Street address" />
@@ -142,21 +150,25 @@ function AddVendorDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
               <Label>State <span className="text-destructive">*</span></Label>
               <Input {...register('state')} placeholder="Maharashtra" />
             </div>
-            <div className="space-y-1">
-              <Label>Payment Terms</Label>
-              <select {...register('paymentTerms')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
-                <option value="">Select...</option>
-                <option value="Cash">Cash</option>
-                <option value="Net 15">Net 15 Days</option>
-                <option value="Net 30">Net 30 Days</option>
-                <option value="Net 45">Net 45 Days</option>
-                <option value="Net 60">Net 60 Days</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label>Credit Limit (₹)</Label>
-              <Input {...register('creditLimit')} type="number" placeholder="100000" />
-            </div>
+            {ff.isEnabled('paymentTerms') && (
+              <div className="space-y-1">
+                <Label>{ff.label('paymentTerms', 'Payment Terms')}</Label>
+                <select {...register('paymentTerms')} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+                  <option value="">Select...</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Net 15">Net 15 Days</option>
+                  <option value="Net 30">Net 30 Days</option>
+                  <option value="Net 45">Net 45 Days</option>
+                  <option value="Net 60">Net 60 Days</option>
+                </select>
+              </div>
+            )}
+            {ff.isEnabled('creditLimit') && (
+              <div className="space-y-1">
+                <Label>{ff.label('creditLimit', 'Credit Limit (₹)')}</Label>
+                <Input {...register('creditLimit')} type="number" placeholder="100000" />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>Cancel</Button>
