@@ -47,15 +47,16 @@ const ALL_PHARMACY = PERMISSION_CATALOG.filter(p => p.module !== 'platform').map
 export const DEFAULT_ROLES: Array<{ name: string; description: string; isSystem: boolean; grants: string[] }> = [
   { name: 'Pharma Admin', description: 'Full access to all pharmacy modules and settings', isSystem: true, grants: ALL_PHARMACY },
   { name: 'Pharmacist', description: 'Dispensing, billing, and inventory management', isSystem: true, grants: [
-    'medicines:view', 'inventory:view', 'billing:view', 'billing:create', 'customers:view', 'customers:create',
-    'prescriptions:view', 'prescriptions:create', 'prescriptions:approve', 'returns:view', 'returns:create',
+    'medicines:view', 'medicines:export', 'inventory:view', 'billing:view', 'billing:create', 'customers:view', 'customers:create',
+    'prescriptions:view', 'prescriptions:create', 'prescriptions:approve', 'returns:view', 'returns:create', 'returns:approve',
   ] },
   { name: 'Inventory Manager', description: 'Stock management, purchase orders, and expiry tracking', isSystem: false, grants: [
-    'medicines:view', 'medicines:create', 'medicines:edit', 'inventory:view', 'inventory:create', 'inventory:edit', 'inventory:delete',
-    'vendors:view', 'vendors:create', 'vendors:edit', 'reports:view',
+    'medicines:view', 'medicines:create', 'medicines:edit', 'medicines:export', 'inventory:view', 'inventory:create', 'inventory:edit', 'inventory:delete',
+    'vendors:view', 'vendors:create', 'vendors:edit', 'returns:view', 'returns:approve', 'reports:view', 'reports:export',
   ] },
   { name: 'Billing Assistant', description: 'Create and manage customer bills', isSystem: false, grants: [
     'billing:view', 'billing:create', 'customers:view', 'customers:create', 'medicines:view', 'inventory:view',
+    'prescriptions:view', 'returns:view', 'returns:create',
   ] },
   { name: 'Reports Viewer', description: 'Read-only access to all reports', isSystem: false, grants: ['reports:view', 'reports:export'] },
 ];
