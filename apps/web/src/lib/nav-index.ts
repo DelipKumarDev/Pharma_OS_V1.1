@@ -58,7 +58,7 @@ export const NAV_INDEX: NavItem[] = [
   { label: 'Daily Close', href: '/reports?tab=daily-close', group: 'Reports', keywords: 'day close cash reconciliation eod' },
 
   // Administration
-  { label: 'Users', href: '/users', group: 'Administration', keywords: 'staff user management accounts' },
+  { label: 'User Management', href: '/users', group: 'Administration', keywords: 'staff users management accounts' },
   { label: 'Roles & Permissions', href: '/roles', group: 'Administration', keywords: 'roles permissions matrix access rbac' },
   { label: 'Notifications', href: '/notifications', group: 'Administration', keywords: 'alerts notifications inbox' },
   { label: 'Integrations', href: '/integrations', group: 'Administration', keywords: 'whatsapp sms email upi integrations' },

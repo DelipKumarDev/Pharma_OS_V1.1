@@ -94,7 +94,7 @@ export const MENU_GROUPS: MenuGroup[] = [
     // admin permission (users:view / settings:view). Universal utilities moved
     // to "Support" below so they don't keep this header visible for every role.
     label: 'Administration', icon: 'Settings2', items: [
-      { label: 'Users', href: '/users', icon: 'UserCog', perm: 'users:view' },
+      { label: 'User Management', href: '/users', icon: 'UserCog', perm: 'users:view' },
       { label: 'Roles & Permissions', href: '/roles', icon: 'Shield', perm: 'users:view' },
       { label: 'Settings', href: '/settings', icon: 'Settings2', perm: 'settings:view' },
     ],

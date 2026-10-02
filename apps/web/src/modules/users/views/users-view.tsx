@@ -231,7 +231,7 @@ export function UsersView() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
-          <p className="text-sm text-muted-foreground">Manage pharmacy staff, roles, and access control</p>
+          <p className="text-sm text-muted-foreground">Invite pharmacy staff and assign each one a role</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => exportCSV(data)}>
