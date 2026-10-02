@@ -178,10 +178,12 @@ async function main() {
   const notif = await api('GET', '/api/notifications', T);
   step('P18-NOTIFICATIONS', 'Notifications endpoint', '200', `status=${notif.status}`, notif.status === 200);
 
-  // ── P19 Export (bills CSV contains the bill) ──
-  const exp = await api('GET', '/api/settings/export/bills', T);
-  const expText = JSON.stringify(exp.json ?? '');
-  step('P19-EXPORT', 'Export bills', '200 + contains bill number', `status=${exp.status} hasBill=${expText.includes(String(billDb?.billNumber))}`, exp.status === 200);
+  // ── P19 Export (bills CSV contains the bill) — the endpoint returns CSV text,
+  // so read the body as text (not JSON) and assert the bill number is present.
+  const expRes = await fetch(`${API}/api/settings/export/bills`, { headers: { Authorization: `Bearer ${T}` } });
+  const expText = await expRes.text();
+  const hasBill = expText.includes(String(billDb?.billNumber));
+  step('P19-EXPORT', 'Export bills CSV', '200 + contains bill number', `status=${expRes.status} hasBill=${hasBill}`, expRes.status === 200 && hasBill);
 
   // ── P20 Backup (tenant-scoped) ──
   const bk = await api('POST', '/api/settings/backup', T);
