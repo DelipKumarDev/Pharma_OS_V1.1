@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { apiFetch } from '@/lib/api';
+import { useCan } from '@/lib/permissions';
 
 interface DeliveryOrder {
   id: string;
@@ -92,6 +93,7 @@ function CreateDialog({ open, onClose }: { open: boolean; onClose: () => void })
 
 export default function DeliveryOrdersPage() {
   const qc = useQueryClient();
+  const can = useCan();
   const { data = [], isLoading } = useQuery({ queryKey: ['delivery-orders'], queryFn: fetchOrders });
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -123,6 +125,7 @@ export default function DeliveryOrdersPage() {
     { id: 'actions', header: '', cell: ({ row }) => {
       const o = row.original;
       if (o.status === 'delivered' || o.status === 'cancelled') return <span className="text-xs text-muted-foreground">{o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString() : ''}</span>;
+      if (!can('billing:edit')) return <span className="text-xs text-muted-foreground">—</span>;
       return (
         <div className="flex gap-1.5 justify-end">
           {o.status === 'pending' && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => statusMutation.mutate({ id: o.id, status: 'out_for_delivery' })}><Truck className="h-3.5 w-3.5" /> Dispatch</Button>}
@@ -140,7 +143,7 @@ export default function DeliveryOrdersPage() {
           <h1 className="text-2xl font-bold tracking-tight">Delivery Orders</h1>
           <p className="text-sm text-muted-foreground">Track home deliveries from dispatch to doorstep</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Delivery</Button>
+        {can('billing:create') && <Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Delivery</Button>}
       </div>
       <div className="grid grid-cols-3 gap-3 max-w-xl">
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary"><Truck className="h-5 w-5 text-muted-foreground" /></div><div><p className="text-xl font-bold">{counts.pending}</p><p className="text-xs text-muted-foreground">Pending</p></div></div>
