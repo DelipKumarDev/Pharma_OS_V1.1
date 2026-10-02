@@ -25,7 +25,7 @@ export const NAV_INDEX: NavItem[] = [
   { label: 'Scan Supplier Invoice', href: '/scan', group: 'Procurement', keywords: 'ocr scan bill invoice upload' },
   { label: 'Vendors', href: '/vendors', group: 'Procurement', keywords: 'supplier distributor vendor' },
   { label: 'Goods Receipt', href: '/goods-receipt', group: 'Procurement', keywords: 'grn receive stock inward' },
-  { label: 'Purchase Returns', href: '/purchase-returns', group: 'Procurement', keywords: 'vendor return debit note' },
+  { label: 'Purchase Returns', href: '/returns?type=vendor_return', group: 'Procurement', keywords: 'vendor return debit note' },
 
   // Inventory
   { label: 'Inventory', href: '/stock', group: 'Inventory', keywords: 'stock levels quantity on hand' },
@@ -46,7 +46,7 @@ export const NAV_INDEX: NavItem[] = [
 
   // Compliance
   { label: 'Schedule Register', href: '/schedule-register', group: 'Compliance', keywords: 'schedule h h1 x register statutory' },
-  { label: 'Controlled Drugs', href: '/controlled-drugs', group: 'Compliance', keywords: 'narcotic psychotropic controlled schedule x' },
+  { label: 'Controlled Drugs', href: '/schedule-register?schedule=X', group: 'Compliance', keywords: 'narcotic psychotropic controlled schedule x' },
   { label: 'Audit Log', href: '/audit', group: 'Compliance', keywords: 'audit trail activity log' },
 
   // Reports

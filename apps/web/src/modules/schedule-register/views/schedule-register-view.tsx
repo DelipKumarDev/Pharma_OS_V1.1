@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import { ShieldAlert, Download, Search, FileText, CalendarDays } from 'lucide-react';
@@ -71,7 +72,12 @@ const scheduleBadge: Record<string, 'destructive' | 'warning' | 'secondary'> = {
 };
 
 export function ScheduleRegisterView() {
-  const [tab, setTab] = useState('all');
+  // Deep-link support, e.g. Compliance → Controlled Drugs opens
+  // /schedule-register?schedule=X.
+  const initialSchedule = useSearchParams().get('schedule');
+  const [tab, setTab] = useState(
+    ['H', 'H1', 'X', 'G', 'C', 'E'].includes(initialSchedule ?? '') ? (initialSchedule as string) : 'all',
+  );
   const [search, setSearch] = useState('');
 
   const { data: stats } = useQuery({ queryKey: ['schedule-register-stats'], queryFn: fetchStats });

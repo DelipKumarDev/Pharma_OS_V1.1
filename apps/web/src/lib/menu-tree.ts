@@ -46,7 +46,7 @@ export const MENU_GROUPS: MenuGroup[] = [
       { label: 'Scan Supplier Invoice', href: '/scan', icon: 'ScanLine', perm: 'inventory:view' },
       { label: 'Vendors', href: '/vendors', icon: 'Building2', perm: 'vendors:view' },
       { label: 'Goods Receipt', href: '/goods-receipt', icon: 'ClipboardCheck', perm: 'inventory:view' },
-      { label: 'Purchase Returns', href: '/purchase-returns', icon: 'Undo2', perm: 'returns:view' },
+      { label: 'Purchase Returns', href: '/returns?type=vendor_return', icon: 'Undo2', perm: 'returns:view' },
     ],
   },
   {
@@ -73,7 +73,7 @@ export const MENU_GROUPS: MenuGroup[] = [
   {
     label: 'Compliance', icon: 'ShieldCheck', items: [
       { label: 'Schedule Register', href: '/schedule-register', icon: 'ShieldAlert', perm: 'reports:view' },
-      { label: 'Controlled Drugs', href: '/controlled-drugs', icon: 'Lock', perm: 'reports:view' },
+      { label: 'Controlled Drugs', href: '/schedule-register?schedule=X', icon: 'Lock', perm: 'reports:view' },
     ],
   },
   {

@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
   RotateCcw, Clock, CheckCircle, XCircle, AlertTriangle, Plus,
@@ -556,7 +557,12 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
 
 export function ReturnsView() {
   const can = useCan();
-  const [typeFilter, setTypeFilter] = useState<ReturnType | 'all'>('all');
+  // Allow deep-linking to a pre-filtered view, e.g. Procurement → Purchase
+  // Returns opens /returns?type=vendor_return.
+  const initialType = useSearchParams().get('type');
+  const [typeFilter, setTypeFilter] = useState<ReturnType | 'all'>(
+    initialType === 'vendor_return' || initialType === 'customer_return' ? (initialType as ReturnType) : 'all',
+  );
   const [pendingOnly, setPendingOnly] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<ReturnRequest | null>(null);
   const [newReturnOpen, setNewReturnOpen] = useState(false);
