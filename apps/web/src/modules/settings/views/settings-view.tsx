@@ -278,10 +278,16 @@ function TaxSection({ data, onSave }: { data: SettingsData; onSave: (s: string, 
 
   async function save() {
     setSaving(true);
-    await Promise.all([onSave('tax', form as unknown as Record<string, unknown>), onSave('billing', billing)]);
+    const b = billing as Record<string, unknown>;
+    // Only the payment-method fields live here now; receipt content (GST display,
+    // generic name, terms, thank-you, auto-print) moved to Receipt Configuration.
+    const paymentBilling = {
+      acceptCash: b['acceptCash'], acceptUPI: b['acceptUPI'], acceptCard: b['acceptCard'],
+      acceptCredit: b['acceptCredit'], upiId: b['upiId'],
+    };
+    await Promise.all([onSave('tax', form as unknown as Record<string, unknown>), onSave('billing', paymentBilling)]);
     // Reflect the accepted-payment toggles on the auth user so the POS updates
     // live (it reads user.acceptedPaymentMethods), no re-login needed.
-    const b = billing as Record<string, unknown>;
     const accepted = (['cash', 'upi', 'card', 'credit'] as const).filter((k) => {
       const flag = { cash: 'acceptCash', upi: 'acceptUPI', card: 'acceptCard', credit: 'acceptCredit' }[k];
       return b[flag] !== false;
@@ -293,14 +299,12 @@ function TaxSection({ data, onSave }: { data: SettingsData; onSave: (s: string, 
 
   return (
     <div>
-      <SectionHeader title="Tax & Billing" description="GST configuration, payment methods and invoice customization" />
+      <SectionHeader title="Tax & Billing" description="GST configuration and accepted payment methods. Receipt layout & wording live in Receipt Configuration." />
 
       <div className="space-y-4">
         <div className="rounded-xl border border-border p-4 space-y-3">
           <p className="text-sm font-semibold">GST Settings</p>
           <ToggleRow label="GST Registered" description="Enable GST on all transactions" checked={Boolean(form.enableGST)} onChange={(v) => setForm((p) => ({ ...p, enableGST: v }))} />
-          <ToggleRow label="Show GST on Invoices" description="Print GST breakdown on patient receipts" checked={Boolean(billing.showGSTOnReceipt)} onChange={(v) => setBilling((p) => ({ ...p, showGSTOnReceipt: v }))} />
-          <ToggleRow label="Show Generic Name" description="Print generic name below brand name on receipts" checked={Boolean(billing.showGenericName)} onChange={(v) => setBilling((p) => ({ ...p, showGenericName: v }))} />
         </div>
 
         <div className="rounded-xl border border-border p-4 space-y-3">
@@ -337,34 +341,6 @@ function TaxSection({ data, onSave }: { data: SettingsData; onSave: (s: string, 
               <Input value={String(billing.upiId ?? '')} onChange={(e) => setBilling((p) => ({ ...p, upiId: e.target.value }))} className="h-8 text-sm mt-1 font-mono" placeholder="yourpharmacy@upi" />
             </div>
           )}
-        </div>
-
-        <div className="rounded-xl border border-border p-4 space-y-3">
-          <p className="text-sm font-semibold">Receipt Customization</p>
-          <div>
-            <Label className="text-xs">Terms & Conditions</Label>
-            <textarea
-              value={String(billing.termsOnReceipt ?? '')}
-              onChange={(e) => setBilling((p) => ({ ...p, termsOnReceipt: e.target.value }))}
-              rows={3}
-              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Thank You Message</Label>
-            <Input
-              value={String(billing.thankYouMessage ?? '')}
-              onChange={(e) => setBilling((p) => ({ ...p, thankYouMessage: e.target.value }))}
-              className="h-8 text-sm mt-1"
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium">Auto-print receipt on sale</p>
-              <p className="text-2xs text-muted-foreground">Sends to default printer after each bill</p>
-            </div>
-            <ToggleSwitch checked={Boolean(billing.printReceiptOnSale)} onChange={(v) => setBilling((p) => ({ ...p, printReceiptOnSale: v }))} />
-          </div>
         </div>
       </div>
 
@@ -1078,7 +1054,24 @@ function ReceiptSection({ data, onSave }: { data: SettingsData; onSave: (s: stri
   const [form, setForm] = useState<Record<string, boolean | string>>({ paperSize: 'thermal80', ...(data.receipt ?? {}) });
   const [saving, setSaving] = useState(false);
   const paperSize = (form.paperSize as string) ?? 'thermal80';
-  async function save() { setSaving(true); await onSave('receipt', form); setSaving(false); toast.success('Receipt configuration saved'); }
+  // Receipt *content* fields persist in the `billing` section (tenant columns);
+  // they moved here from Tax & Billing so all "what prints" settings live in one
+  // place. Each section saves only its own fields (partial PATCH), so there's no
+  // overwrite between the two.
+  const b = (data.billing ?? {}) as Record<string, unknown>;
+  const [content, setContent] = useState({
+    showGSTOnReceipt: b['showGSTOnReceipt'] !== false,
+    showGenericName: b['showGenericName'] === true,
+    printReceiptOnSale: b['printReceiptOnSale'] !== false,
+    termsOnReceipt: String(b['termsOnReceipt'] ?? ''),
+    thankYouMessage: String(b['thankYouMessage'] ?? ''),
+  });
+  async function save() {
+    setSaving(true);
+    await Promise.all([onSave('receipt', form), onSave('billing', content)]);
+    setSaving(false);
+    toast.success('Receipt configuration saved');
+  }
   return (
     <div>
       <SectionHeader title="Receipt Configuration" description="Pick the print size and choose what appears on the bill. Changes apply to the very next print — no reload needed." />
@@ -1121,6 +1114,28 @@ function ReceiptSection({ data, onSave }: { data: SettingsData; onSave: (s: stri
             ))}
           </div>
         ))}
+
+        {/* Receipt content (moved from Tax & Billing) */}
+        <div className="rounded-xl border border-border p-4">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">Content &amp; Behaviour</p>
+          <ToggleRow label="Show GST on receipt" description="Print the GST amount / breakdown on patient bills" checked={content.showGSTOnReceipt} onChange={(v) => setContent((p) => ({ ...p, showGSTOnReceipt: v }))} />
+          <ToggleRow label="Show generic name" description="Print the generic name below the brand name" checked={content.showGenericName} onChange={(v) => setContent((p) => ({ ...p, showGenericName: v }))} />
+          <ToggleRow label="Auto-print receipt on sale" description="Send to the default printer after each bill" checked={content.printReceiptOnSale} onChange={(v) => setContent((p) => ({ ...p, printReceiptOnSale: v }))} />
+          <div className="pt-3">
+            <Label className="text-xs">Thank You Message</Label>
+            <Input value={content.thankYouMessage} onChange={(e) => setContent((p) => ({ ...p, thankYouMessage: e.target.value }))} className="h-8 text-sm mt-1" placeholder="Thank you — visit again!" />
+          </div>
+          <div className="pt-3">
+            <Label className="text-xs">Terms &amp; Conditions</Label>
+            <textarea
+              value={content.termsOnReceipt}
+              onChange={(e) => setContent((p) => ({ ...p, termsOnReceipt: e.target.value }))}
+              rows={3}
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Medicines once sold will not be taken back…"
+            />
+          </div>
+        </div>
       </div>
       <SaveBar onSave={save} saving={saving} />
     </div>

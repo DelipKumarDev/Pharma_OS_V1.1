@@ -43,7 +43,7 @@ Two concrete instances were found and fixed:
 
 ## Duplicates / improvements
 
-- **Receipt settings split across two tiles** — "Tax & Billing" holds `showGSTOnReceipt / showGenericName / termsOnReceipt / thankYouMessage`, while "Receipt Configuration" holds the layout + a *separate* set of print toggles (GSTIN, GST breakdown, doctor, batch/expiry…). These overlap conceptually ("what prints on the bill") and are a likely source of confusion. **Recommendation:** fold the Tax & Billing receipt-content toggles into Receipt Configuration, leaving Tax & Billing to GST + payment methods only. (Not done here — it's a UX refactor worth doing deliberately, not a silent disconnect.)
+- **Receipt settings split across two tiles** — ✅ **DONE.** The Tax & Billing receipt-content controls (`showGSTOnReceipt`, `showGenericName`, `termsOnReceipt`, `thankYouMessage`, auto-print) were moved into **Receipt Configuration** (new "Content & Behaviour" group). Tax & Billing now holds only GST + payment methods. Each section saves its own non-overlapping slice of the `billing` section (partial PATCH), so there's no cross-overwrite. Verified live: editing the thank-you in Receipt Configuration persists and is read back via `/api/settings/public`.
 - **`paymentMethod` dropdown** (Dropdown Options) — removed earlier; the Tax & Billing "Payment Methods Accepted" toggles are now the single source of truth.
 - **Backup** appears under both "Preferences" (auto-backup) and "Data Management → Import & Export" (manual backup) — related but not identical (schedule vs on-demand); acceptable.
 
