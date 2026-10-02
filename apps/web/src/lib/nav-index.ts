@@ -31,7 +31,7 @@ export const NAV_INDEX: NavItem[] = [
   { label: 'Inventory', href: '/stock', group: 'Inventory', keywords: 'stock levels quantity on hand' },
   { label: 'Medicine Catalog', href: '/medicines', group: 'Inventory', keywords: 'medicines drugs products master catalogue' },
   { label: 'Batch Management', href: '/batch-management', group: 'Inventory', keywords: 'batch lot expiry' },
-  { label: 'Stock Adjustment', href: '/stock-adjustment', group: 'Inventory', keywords: 'adjust damage correction write off' },
+  { label: 'Stock Adjustment', href: '/stock', group: 'Inventory', keywords: 'adjust damage correction write off' },
   { label: 'Transfers', href: '/transfers', group: 'Inventory', keywords: 'transfer relocate rack move' },
   { label: 'Reorder Queue', href: '/reorder', group: 'Inventory', keywords: 'reorder low stock replenish' },
   { label: 'Expiry Monitor', href: '/expiry', group: 'Inventory', keywords: 'near expiry expired expiring' },

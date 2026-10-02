@@ -54,7 +54,6 @@ export const MENU_GROUPS: MenuGroup[] = [
       { label: 'Stock Management', href: '/stock', icon: 'Package', perm: 'inventory:view' },
       { label: 'Medicine Catalog', href: '/medicines', icon: 'Pill', perm: 'medicines:view' },
       { label: 'Batch Management', href: '/batch-management', icon: 'Boxes', perm: 'inventory:view' },
-      { label: 'Stock Adjustment', href: '/stock-adjustment', icon: 'SlidersHorizontal', perm: 'inventory:view' },
       { label: 'Transfers', href: '/transfers', icon: 'ArrowLeftRight', perm: 'inventory:view' },
       { label: 'Reorder Queue', href: '/reorder', icon: 'RefreshCw', perm: 'inventory:view' },
       { label: 'Expiry Monitor', href: '/expiry', icon: 'CalendarX2', perm: 'inventory:view' },
