@@ -274,10 +274,19 @@ function TaxSection({ data, onSave }: { data: SettingsData; onSave: (s: string, 
   const [form, setForm] = useState({ ...data.tax, gstSlabs: data.tax?.gstSlabs ?? [] });
   const [billing, setBilling] = useState({ ...data.billing });
   const [saving, setSaving] = useState(false);
+  const patchUser = useAuthStore((s) => s.patchUser);
 
   async function save() {
     setSaving(true);
     await Promise.all([onSave('tax', form as unknown as Record<string, unknown>), onSave('billing', billing)]);
+    // Reflect the accepted-payment toggles on the auth user so the POS updates
+    // live (it reads user.acceptedPaymentMethods), no re-login needed.
+    const b = billing as Record<string, unknown>;
+    const accepted = (['cash', 'upi', 'card', 'credit'] as const).filter((k) => {
+      const flag = { cash: 'acceptCash', upi: 'acceptUPI', card: 'acceptCard', credit: 'acceptCredit' }[k];
+      return b[flag] !== false;
+    });
+    patchUser({ acceptedPaymentMethods: accepted });
     setSaving(false);
     toast.success('Tax & billing settings saved');
   }

@@ -13,6 +13,18 @@ import { v4 as uuidv4 } from 'uuid';
 function resolveFormFields(raw: unknown): Record<string, unknown> {
   return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
 }
+
+// Accepted payment methods (Settings → Tax & Billing toggles) carried on the auth
+// user so the POS can honour them without needing settings:view. A method is
+// included unless its tenant flag is explicitly false (new tenants default on).
+function resolveAcceptedPayments(tenant: { acceptCash: boolean | null; acceptUPI: boolean | null; acceptCard: boolean | null; acceptCredit: boolean | null }): string[] {
+  const out: string[] = [];
+  if (tenant.acceptCash !== false) out.push('cash');
+  if (tenant.acceptUPI !== false) out.push('upi');
+  if (tenant.acceptCard !== false) out.push('card');
+  if (tenant.acceptCredit !== false) out.push('credit');
+  return out;
+}
 import type {
   LoginInput,
   RefreshInput,
@@ -208,6 +220,7 @@ export async function login(
       dateFormat: user.tenant.dateFormat ?? undefined,
       supportContact: user.tenant.supportContact ?? undefined,
       dropdownOptions: resolveDropdowns(user.tenant.dropdownOptions),
+      acceptedPaymentMethods: resolveAcceptedPayments(user.tenant),
       messageTemplates: resolveTemplates(user.tenant.messageTemplates),
       menuHidden: computeMenuHidden(user.tenant.menuAccess, roles, permissions),
       formFields: resolveFormFields(user.tenant.formFields),
@@ -302,6 +315,7 @@ export async function refreshTokens(input: RefreshInput) {
       dateFormat: user.tenant.dateFormat ?? undefined,
       supportContact: user.tenant.supportContact ?? undefined,
       dropdownOptions: resolveDropdowns(user.tenant.dropdownOptions),
+      acceptedPaymentMethods: resolveAcceptedPayments(user.tenant),
       messageTemplates: resolveTemplates(user.tenant.messageTemplates),
       roles,
       permissions,
@@ -344,6 +358,7 @@ export async function getMe(userId: string) {
     dateFormat: user.tenant.dateFormat ?? undefined,
     supportContact: user.tenant.supportContact ?? undefined,
     dropdownOptions: resolveDropdowns(user.tenant.dropdownOptions),
+    acceptedPaymentMethods: resolveAcceptedPayments(user.tenant),
     messageTemplates: resolveTemplates(user.tenant.messageTemplates),
     menuHidden: computeMenuHidden(user.tenant.menuAccess, roles, permissions),
     formFields: resolveFormFields(user.tenant.formFields),

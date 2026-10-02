@@ -20,7 +20,9 @@ export const DROPDOWN_REGISTRY: DropdownDef[] = [
   { key: 'medicineUnit', label: 'Medicine Units', description: 'Packaging units (strip, bottle, vial…).' },
   { key: 'gstRate', label: 'GST Rates (%)', description: 'Applicable GST slabs for pricing.' },
   { key: 'customerType', label: 'Customer Types', description: 'Categories used when adding a customer.' },
-  { key: 'paymentMethod', label: 'Payment Methods', description: 'Accepted payment modes at billing.' },
+  // Payment methods are configured via Settings → Tax & Billing → "Payment
+  // Methods Accepted" (billing.accept* toggles), which the POS reads directly.
+  // Not a dropdown-options list, to avoid two competing controls for one thing.
 ];
 
 export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
@@ -29,7 +31,6 @@ export const DEFAULT_DROPDOWNS: Record<string, string[]> = {
   medicineUnit: ['strip', 'bottle', 'vial', 'tube', 'sachet', 'box', 'piece'],
   gstRate: ['0', '5', '12', '18', '28'],
   customerType: ['walk_in', 'regular', 'vip', 'credit'],
-  paymentMethod: ['cash', 'upi', 'card', 'credit'],
 };
 
 /**

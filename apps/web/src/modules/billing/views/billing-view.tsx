@@ -24,7 +24,6 @@ import { cn } from '@/lib/utils';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/auth-store';
 import { apiFetch } from '@/lib/api';
-import { useDropdown } from '@/lib/dropdowns';
 import { useCan } from '@/lib/permissions';
 import { useFormFieldConfig } from '@/lib/form-fields';
 import { isOnline, getCatalog, cacheCatalog, enqueueOp } from '@/lib/offline';
@@ -695,16 +694,13 @@ export function BillingView() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [doctor, setDoctor] = useState('');
-  // Payment methods are admin-configurable (Settings → Dropdown Options). Only the
-  // enabled methods appear here; if the current selection is disabled, fall to the
-  // first available one.
-  const paymentMethods = useDropdown('paymentMethod');
   const can = useCan();
   const ff = useFormFieldConfig('billing');
-  const [payMethod, setPayMethod] = useState<string>(paymentMethods[0] ?? 'cash');
-  useEffect(() => {
-    if (paymentMethods.length && !paymentMethods.includes(payMethod)) setPayMethod(paymentMethods[0]!);
-  }, [paymentMethods, payMethod]);
+  // Payment methods are controlled by Settings → Tax & Billing → "Payment Methods
+  // Accepted" (billing.acceptCash/acceptUPI/acceptCard/acceptCredit). The enabled
+  // set is derived from those toggles below (after pharmSettings loads); if the
+  // current selection gets disabled, we fall back to the first available one.
+  const [payMethod, setPayMethod] = useState<string>('cash');
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [cashTendered, setCashTendered] = useState('');
 
@@ -734,11 +730,11 @@ export function BillingView() {
     queryKey: ['billing-pharmacy-settings'],
     queryFn: async () => {
       const r = await apiFetch('/api/settings');
-      const j = await r.json() as { data?: { profile?: Record<string, string>; billing?: { upiId?: string } } };
+      const j = await r.json() as { data?: { profile?: Record<string, string>; billing?: Record<string, unknown> } };
       return j.data ?? {};
     },
     // Re-read settings whenever billing opens so a just-saved UPI ID / pharmacy
-    // detail shows immediately (no stale-cache "No UPI ID configured" error).
+    // detail (and the accepted-payment toggles) show immediately — no stale cache.
     staleTime: 0,
     refetchOnMount: 'always',
     networkMode: 'always',
@@ -746,7 +742,19 @@ export function BillingView() {
   const pharmacyName = user?.tenantName ?? pharmSettings?.profile?.pharmacyName ?? 'Pharmacy';
   const pharmacyPhone = pharmSettings?.profile?.mobile || pharmSettings?.profile?.phone || '';
   const drugLicense = pharmSettings?.profile?.drugLicenseNumber || '';
-  const upiId = pharmSettings?.billing?.upiId || '';
+  const upiId = (pharmSettings?.billing?.upiId as string | undefined) || '';
+
+  // Accepted payment methods come from the "Payment Methods Accepted" toggles
+  // (Settings → Tax & Billing), carried on the auth user so the POS honours them
+  // even for cashiers without settings:view (and live via patchUser on save).
+  // Falls back to all four when absent (older session / not yet configured).
+  const acceptedPayments = user?.acceptedPaymentMethods ?? ['cash', 'upi', 'card', 'credit'];
+  const paymentMethods = (['cash', 'upi', 'card', 'credit'] as const).filter((k) => acceptedPayments.includes(k));
+  const paymentMethodsKey = paymentMethods.join(',');
+  useEffect(() => {
+    if (paymentMethods.length && !paymentMethods.includes(payMethod as typeof paymentMethods[number])) setPayMethod(paymentMethods[0]!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethodsKey, payMethod]);
 
   const { data: suggestions = [] } = useQuery({
     queryKey: ['med-search', search],

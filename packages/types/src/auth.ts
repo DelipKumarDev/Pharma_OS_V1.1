@@ -35,6 +35,9 @@ export interface AuthUser {
   supportContact?: string;
   /** Per-tenant configurable dropdown option lists, keyed by registry key (TC_028). */
   dropdownOptions?: Record<string, string[]>;
+  /** Accepted payment methods (Settings → Tax & Billing toggles), e.g. ['cash','upi'].
+   *  Carried here so the POS honours them without needing settings:view. */
+  acceptedPaymentMethods?: string[];
   /** Per-tenant configurable message templates (refill reminder, alerts…). */
   messageTemplates?: Record<string, string>;
   /** Menu keys (sidebar leaf hrefs) hidden for this user's role(s). */
