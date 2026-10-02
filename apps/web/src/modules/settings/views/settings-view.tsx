@@ -11,7 +11,7 @@ import {
   ChevronRight, Info, Mail, MessageCircle, PhoneCall,
   FormInput, ShieldCheck, UserCog, Shield, ClipboardList, ExternalLink,
   MessageSquare, Plus, ListChecks, Lock, Eye, EyeOff, Sparkles,
-  Plug, KeyRound, ArrowLeft,
+  Plug, ArrowLeft,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth-store';
 import Link from 'next/link';
@@ -1201,7 +1201,6 @@ const DOMAINS: Domain[] = [
     links: [
       { href: '/users', label: 'User Management', icon: UserCog, perm: 'users:view' },
       { href: '/roles', label: 'Roles & Permissions', icon: Shield, perm: 'users:view' },
-      { href: '/permissions', label: 'Permissions Matrix', icon: KeyRound, perm: 'users:view' },
       // Audit Log lives ONLY here (removed from the Compliance sidebar group).
       // Gated by RBAC: granting/revoking `settings:view` on a role activates/
       // deactivates it — the /audit API requires the same permission.

@@ -59,8 +59,7 @@ export const NAV_INDEX: NavItem[] = [
 
   // Administration
   { label: 'Users', href: '/users', group: 'Administration', keywords: 'staff user management accounts' },
-  { label: 'Roles', href: '/roles', group: 'Administration', keywords: 'roles access rbac' },
-  { label: 'Permissions', href: '/permissions', group: 'Administration', keywords: 'permissions matrix access rbac' },
+  { label: 'Roles & Permissions', href: '/roles', group: 'Administration', keywords: 'roles permissions matrix access rbac' },
   { label: 'Notifications', href: '/notifications', group: 'Administration', keywords: 'alerts notifications inbox' },
   { label: 'Integrations', href: '/integrations', group: 'Administration', keywords: 'whatsapp sms email upi integrations' },
   { label: 'Help', href: '/help', group: 'Administration', keywords: 'help support faq guide' },
