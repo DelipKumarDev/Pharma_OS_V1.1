@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 const REASONS = [
   'Physical stock count correction',
@@ -46,6 +47,7 @@ interface Props {
 
 export function AdjustStockDialog({ item, open, onOpenChange }: Props) {
   const qc = useQueryClient();
+  const ff = useFormFieldConfig('adjustStock');
   const systemQty = item?.availableQuantity ?? 0;
   const medicineName = (item as (InventoryItem & { medicineName?: string }) | null)?.medicineName
     ?? (item?.medicine as { name?: string } | undefined)?.name ?? '';
@@ -187,14 +189,16 @@ export function AdjustStockDialog({ item, open, onOpenChange }: Props) {
           </div>
 
           {/* Notes */}
-          <div className="space-y-1.5">
-            <Label>Additional Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
-            <Textarea
-              {...register('notes')}
-              placeholder="Add context about the discrepancy…"
-              className="resize-none h-20 text-sm"
-            />
-          </div>
+          {ff.isEnabled('notes') && (
+            <div className="space-y-1.5">
+              <Label>{ff.label('notes', 'Additional Notes')} {!ff.isRequired('notes') && <span className="text-muted-foreground text-xs">(optional)</span>}</Label>
+              <Textarea
+                {...register('notes')}
+                placeholder="Add context about the discrepancy…"
+                className="resize-none h-20 text-sm"
+              />
+            </div>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

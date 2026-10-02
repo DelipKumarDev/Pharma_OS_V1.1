@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Role, User } from '@pharmaos/types';
 import { apiFetch } from '@/lib/api';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 const schema = z.object({
   name: z.string().min(2, 'Name is required'),
@@ -49,6 +50,7 @@ async function inviteUser(data: FormValues): Promise<User> {
 
 export function InviteUserDialog({ open, onOpenChange }: Props) {
   const qc = useQueryClient();
+  const ff = useFormFieldConfig('inviteUser');
   const [selectedRoles, setSelectedRoles] = React.useState<string[]>([]);
 
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
@@ -94,13 +96,13 @@ export function InviteUserDialog({ open, onOpenChange }: Props) {
 
         <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
           <div className="space-y-1">
-            <Label>Full Name <span className="text-destructive">*</span></Label>
+            <Label>{ff.label('name', 'Full Name')} <span className="text-destructive">*</span></Label>
             <Input {...register('name')} placeholder="e.g. Ravi Kumar" />
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
 
           <div className="space-y-1">
-            <Label>Email Address <span className="text-destructive">*</span></Label>
+            <Label>{ff.label('email', 'Email Address')} <span className="text-destructive">*</span></Label>
             <div className="relative">
               <Mail className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input {...register('email')} type="email" className="pl-8" placeholder="user@pharmacy.com" />
@@ -108,10 +110,12 @@ export function InviteUserDialog({ open, onOpenChange }: Props) {
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
 
-          <div className="space-y-1">
-            <Label>Phone</Label>
-            <Input {...register('phone')} placeholder="10-digit mobile number" maxLength={10} />
-          </div>
+          {ff.isEnabled('phone') && (
+            <div className="space-y-1">
+              <Label>{ff.label('phone', 'Phone')}{ff.isRequired('phone') && <span className="text-destructive"> *</span>}</Label>
+              <Input {...register('phone')} placeholder="10-digit mobile number" maxLength={10} />
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label className="flex items-center gap-1.5">

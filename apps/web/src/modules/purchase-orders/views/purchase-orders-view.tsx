@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
 import { useCan } from '@/lib/permissions';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ interface DraftLine { medicineId: string; medicineName: string; quantity: number
 
 function CreatePODialog({ open, onOpenChange, prefill }: { open: boolean; onOpenChange: (o: boolean) => void; prefill?: DraftLine | null }) {
   const qc = useQueryClient();
+  const ff = useFormFieldConfig('purchaseOrder');
   const [vendorId, setVendorId] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
@@ -160,10 +162,12 @@ function CreatePODialog({ open, onOpenChange, prefill }: { open: boolean; onOpen
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label>Expected Delivery</Label>
-              <Input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
-            </div>
+            {ff.isEnabled('expectedDate') && (
+              <div className="space-y-1">
+                <Label>{ff.label('expectedDate', 'Expected Delivery')}</Label>
+                <Input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+              </div>
+            )}
           </div>
 
           {/* Add medicine */}
@@ -214,10 +218,12 @@ function CreatePODialog({ open, onOpenChange, prefill }: { open: boolean; onOpen
             ))}
           </div>
 
-          <div className="space-y-1">
-            <Label>Notes</Label>
-            <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
-          </div>
+          {ff.isEnabled('notes') && (
+            <div className="space-y-1">
+              <Label>{ff.label('notes', 'Notes')}</Label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
+            </div>
+          )}
 
           <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2">
             <span className="text-sm text-muted-foreground">Subtotal (excl. GST)</span>

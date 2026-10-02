@@ -33,7 +33,7 @@ Two concrete instances were found and fixed:
 | | timezone | — | ⚠️ stored, not applied client-side (minor) |
 | | auto-backup / frequency | backup job | ✅ works (backend) |
 | **Dropdown Options** | list options (category/form/unit/gst/customerType) | `useDropdown` | ✅ works (customerType reconciled earlier) |
-| **Form Fields** | show/require/label per field | `useFormFieldConfig` (6 forms) | ✅ works |
+| **Form Fields** | show/require/label per field | `useFormFieldConfig` (**10 forms**) | ✅ works |
 | **Access Control** | menu/tab visibility per role | `menuHidden` / sidebar + route guard | ✅ works |
 | **Change Password** | — | auth API | ✅ functional |
 | **Import & Export / Backup** | bulk import/export/backup | settings API (admin) | ✅ functional |

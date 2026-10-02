@@ -5,6 +5,7 @@ import {
   Eye, EyeOff, Pencil, Check, X, ChevronUp, ChevronDown,
   Plus, Trash2, GripVertical, Receipt, Pill, Package,
   Users, Building2, FileText, AlertCircle, RotateCcw,
+  Truck, SlidersHorizontal, UserPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -132,6 +133,46 @@ const DEFAULT_CONFIGS: FormConfig[] = [
       { id: 'notes', originalLabel: 'Notes', label: 'Notes', type: 'textarea', required: false, enabled: true, order: 7, isCustom: false },
     ],
   },
+  {
+    id: 'returns',
+    name: 'Returns',
+    description: 'Customer-info fields when logging a return (reason & refund method are always required)',
+    fields: [
+      { id: 'customerName', originalLabel: 'Customer Name', label: 'Customer Name', type: 'text', required: true, enabled: true, order: 0, isCustom: false },
+      { id: 'customerPhone', originalLabel: 'Phone', label: 'Phone', type: 'phone', required: false, enabled: true, order: 1, isCustom: false },
+      { id: 'notes', originalLabel: 'Notes', label: 'Notes', type: 'textarea', required: false, enabled: true, order: 2, isCustom: false },
+    ],
+  },
+  {
+    id: 'purchaseOrder',
+    name: 'Purchase Order',
+    description: 'Fields when raising a purchase order',
+    fields: [
+      { id: 'vendor', originalLabel: 'Vendor', label: 'Vendor', type: 'select', required: true, enabled: true, order: 0, isCustom: false },
+      { id: 'expectedDate', originalLabel: 'Expected Delivery', label: 'Expected Delivery', type: 'date', required: false, enabled: true, order: 1, isCustom: false },
+      { id: 'notes', originalLabel: 'Notes', label: 'Notes', type: 'text', required: false, enabled: true, order: 2, isCustom: false },
+    ],
+  },
+  {
+    id: 'adjustStock',
+    name: 'Stock Adjustment',
+    description: 'Fields when adjusting a batch quantity',
+    fields: [
+      { id: 'physicalCount', originalLabel: 'Physical Count', label: 'Physical Count', type: 'number', required: true, enabled: true, order: 0, isCustom: false },
+      { id: 'reason', originalLabel: 'Reason', label: 'Reason', type: 'select', required: true, enabled: true, order: 1, isCustom: false },
+      { id: 'notes', originalLabel: 'Additional Notes', label: 'Additional Notes', type: 'textarea', required: false, enabled: true, order: 2, isCustom: false },
+    ],
+  },
+  {
+    id: 'inviteUser',
+    name: 'Invite User',
+    description: 'Fields when inviting a staff member',
+    fields: [
+      { id: 'name', originalLabel: 'Full Name', label: 'Full Name', type: 'text', required: true, enabled: true, order: 0, isCustom: false },
+      { id: 'email', originalLabel: 'Email Address', label: 'Email Address', type: 'email', required: true, enabled: true, order: 1, isCustom: false },
+      { id: 'phone', originalLabel: 'Phone', label: 'Phone', type: 'phone', required: false, enabled: true, order: 2, isCustom: false },
+    ],
+  },
 ];
 
 const FORM_ICONS: Record<string, React.ElementType> = {
@@ -141,6 +182,10 @@ const FORM_ICONS: Record<string, React.ElementType> = {
   customer: Users,
   vendor: Building2,
   prescription: FileText,
+  returns: RotateCcw,
+  purchaseOrder: Truck,
+  adjustStock: SlidersHorizontal,
+  inviteUser: UserPlus,
 };
 
 const TYPE_COLORS: Record<FieldType, string> = {

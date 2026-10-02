@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
 import { useCan } from '@/lib/permissions';
+import { useFormFieldConfig } from '@/lib/form-fields';
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
@@ -271,6 +272,7 @@ interface ReturnLine {
 
 function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
+  const ff = useFormFieldConfig('returns');
   const [type, setType] = useState<ReturnType>('customer_return');
   const [billNumber, setBillNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -439,8 +441,10 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
                 {billLookup === 'notfound' && billNumber.trim().length >= 3 && <p className="text-2xs text-muted-foreground">No matching bill found — you can still enter the details manually.</p>}
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Input placeholder="Customer name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-8 text-sm" />
-                <Input placeholder="Phone number" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="h-8 text-sm" maxLength={10} />
+                <Input placeholder={`${ff.label('customerName', 'Customer name')} *`} value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="h-8 text-sm" />
+                {ff.isEnabled('customerPhone') && (
+                  <Input placeholder={ff.label('customerPhone', 'Phone number')} value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="h-8 text-sm" maxLength={10} />
+                )}
               </div>
             </div>
           ) : (
@@ -508,9 +512,11 @@ function NewReturnSheet({ open, onClose }: { open: boolean; onClose: () => void 
               <option value="near_expiry">Near Expiry</option>
               <option value="other">Other</option>
             </select>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="Additional notes (optional)…" />
+            {ff.isEnabled('notes') && (
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder={`${ff.label('notes', 'Additional notes')} (optional)…`} />
+            )}
           </div>
 
           {/* Refund / settlement method — for both customer and vendor returns (TC_003) */}
