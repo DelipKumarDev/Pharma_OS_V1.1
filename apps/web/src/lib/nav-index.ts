@@ -51,6 +51,7 @@ export const NAV_INDEX: NavItem[] = [
 
   // Reports
   { label: 'Sales Report', href: '/reports?tab=sales', group: 'Reports', keywords: 'sales revenue report analytics' },
+  { label: 'Purchase Report', href: '/reports?tab=purchase', group: 'Reports', keywords: 'purchase vendor procurement orders report' },
   { label: 'Inventory Report', href: '/reports?tab=stock', group: 'Reports', keywords: 'stock intelligence dead stock report' },
   { label: 'Financial Report', href: '/reports?tab=profit', group: 'Reports', keywords: 'profit margin financial p&l report' },
   { label: 'GST Report', href: '/reports?tab=gst', group: 'Reports', keywords: 'gst gstr1 tax compliance report' },

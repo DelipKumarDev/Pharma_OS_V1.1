@@ -78,6 +78,7 @@ export const MENU_GROUPS: MenuGroup[] = [
   {
     label: 'Reports', icon: 'BarChart3', items: [
       { label: 'Sales', href: '/reports?tab=sales', icon: 'TrendingUp', perm: 'reports:view' },
+      { label: 'Purchase', href: '/reports?tab=purchase', icon: 'Truck', perm: 'reports:view' },
       { label: 'Inventory', href: '/reports?tab=stock', icon: 'Package', perm: 'reports:view' },
       { label: 'Financial', href: '/reports?tab=profit', icon: 'IndianRupee', perm: 'reports:view' },
       { label: 'GST', href: '/reports?tab=gst', icon: 'Percent', perm: 'reports:view' },

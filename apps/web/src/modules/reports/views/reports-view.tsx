@@ -49,9 +49,18 @@ interface Summary {
   grossProfit: number; grossMarginPct: number; bestDay: { date: string; revenue: number };
   paymentMethods: { cash: number; upi: number; card: number; credit: number };
   newCustomers: number; returningCustomers: number; deadStockValue: number; totalStockValue: number;
+  topCategory?: string;
+  deltas?: { revenue: number; bills: number; grossProfit: number; newCustomers: number };
+}
+interface Purchases {
+  totalPurchase: number; purchaseGST: number; purchaseSubtotal: number;
+  poCount: number; receivedCount: number; pendingCount: number;
+  byVendor: Array<{ vendor: string; value: number; orders: number }>;
+  recent: Array<{ poNumber: string; vendor: string; status: string; date: string; items: number; qty: number; total: number }>;
 }
 interface ReportsData {
   summary: Summary;
+  purchases?: Purchases;
   dailySales: DailySale[];
   topMedicines: Medicine[];
   categories: Category[];
@@ -83,6 +92,7 @@ const PERIODS = [
 // chosen report renders — no in-page tab bar duplicating that navigation.
 const REPORT_META: Record<string, { label: string; desc: string }> = {
   sales: { label: 'Sales Overview', desc: 'Revenue trend, payment mix and peak hours' },
+  purchase: { label: 'Purchase Report', desc: 'Vendor purchases, orders received and purchase value' },
   gst: { label: 'GST & Compliance', desc: 'GST slabs, GSTR-1 export and Schedule-H register' },
   stock: { label: 'Stock Intelligence', desc: 'Category revenue, margins and dead-stock alerts' },
   profit: { label: 'Profitability', desc: 'Gross profit, margins and top medicines' },
@@ -90,6 +100,9 @@ const REPORT_META: Record<string, { label: string; desc: string }> = {
   'daily-close': { label: 'Daily Close', desc: 'End-of-day cash reconciliation' },
 };
 const REPORT_TABS = Object.keys(REPORT_META);
+
+/** Turn a signed growth % (from the API) into the KpiCard trend badge, or hide it. */
+const toTrend = (d?: number) => (d === undefined || d === null ? undefined : { value: Math.abs(Number(d)), positive: Number(d) >= 0 });
 
 const tooltipStyle = {
   contentStyle: {
@@ -152,6 +165,76 @@ function SectionTitle({ children, description }: { children: React.ReactNode; de
   );
 }
 
+// ─── Tab: Purchase Report ────────────────────────────────────────────────────
+
+const PO_STATUS: Record<string, 'warning' | 'secondary' | 'success' | 'muted'> = {
+  ordered: 'warning', partially_received: 'secondary', received: 'success', cancelled: 'muted',
+};
+
+function PurchaseTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
+  const p = data?.purchases;
+  const hasData = !!p && p.poCount > 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label="Total Purchases" value={p ? formatCurrency(p.totalPurchase) : '—'} sub="Order value (incl. GST)" icon={Package} gradient="kpi-teal" loading={loading} />
+        <KpiCard label="Purchase GST" value={p ? formatCurrency(p.purchaseGST) : '—'} sub="Input tax credit" icon={Percent} gradient="kpi-purple" loading={loading} />
+        <KpiCard label="Purchase Orders" value={p ? formatNumber(p.poCount) : '—'} sub={p ? `${p.receivedCount} received · ${p.pendingCount} pending` : ''} icon={Receipt} gradient="kpi-blue" loading={loading} />
+        <KpiCard label="Taxable Value" value={p ? formatCurrency(p.purchaseSubtotal) : '—'} sub="Before GST" icon={TrendingUp} gradient="kpi-amber" loading={loading} />
+      </div>
+
+      {!hasData ? (
+        <div className="rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
+          <Package className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm font-medium">No purchases in this period</p>
+          <p className="text-xs text-muted-foreground mt-1">Raise a purchase order under Procurement → Purchase Orders, then receive goods to see purchase value here.</p>
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* By vendor */}
+          <div className="rounded-xl border border-border bg-card">
+            <div className="border-b border-border px-5 py-3"><h3 className="text-sm font-semibold">Purchases by Vendor</h3></div>
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-border/60 text-xs text-muted-foreground"><th className="px-5 py-2 text-left font-medium">Vendor</th><th className="px-3 py-2 text-center font-medium">Orders</th><th className="px-5 py-2 text-right font-medium">Value</th></tr></thead>
+              <tbody>
+                {p!.byVendor.map((v) => (
+                  <tr key={v.vendor} className="border-b border-border/40 last:border-0">
+                    <td className="px-5 py-2.5 font-medium">{v.vendor}</td>
+                    <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground">{v.orders}</td>
+                    <td className="px-5 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(v.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Recent purchase orders */}
+          <div className="rounded-xl border border-border bg-card">
+            <div className="border-b border-border px-5 py-3"><h3 className="text-sm font-semibold">Recent Purchase Orders</h3></div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-border/60 text-xs text-muted-foreground"><th className="px-5 py-2 text-left font-medium">PO No.</th><th className="px-3 py-2 text-left font-medium">Vendor</th><th className="px-3 py-2 text-center font-medium">Items</th><th className="px-3 py-2 text-center font-medium">Status</th><th className="px-5 py-2 text-right font-medium">Total</th></tr></thead>
+                <tbody>
+                  {p!.recent.map((r) => (
+                    <tr key={r.poNumber} className="border-b border-border/40 last:border-0">
+                      <td className="px-5 py-2.5 font-mono text-xs font-semibold text-primary">{r.poNumber}</td>
+                      <td className="px-3 py-2.5">{r.vendor}</td>
+                      <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground">{r.items} · {r.qty}u</td>
+                      <td className="px-3 py-2.5 text-center"><Badge variant={PO_STATUS[r.status] ?? 'muted'} dot className="text-xs capitalize">{r.status.replace('_', ' ')}</Badge></td>
+                      <td className="px-5 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Tab: Sales Overview ─────────────────────────────────────────────────────
 
 function SalesTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
@@ -162,8 +245,8 @@ function SalesTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
     <div className="space-y-6">
       {/* KPI strip */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Total Revenue" value={summary ? formatCurrency(summary.totalRevenue) : '—'} sub="Period total" icon={TrendingUp} gradient="kpi-teal" loading={loading} trend={{ value: 12.5, positive: true }} />
-        <KpiCard label="Bills Issued" value={summary ? formatNumber(summary.totalBills) : '—'} sub="Transactions" icon={Receipt} gradient="kpi-blue" loading={loading} trend={{ value: 8.3, positive: true }} />
+        <KpiCard label="Total Revenue" value={summary ? formatCurrency(summary.totalRevenue) : '—'} sub="vs previous period" icon={TrendingUp} gradient="kpi-teal" loading={loading} trend={toTrend(summary?.deltas?.revenue)} />
+        <KpiCard label="Bills Issued" value={summary ? formatNumber(summary.totalBills) : '—'} sub="vs previous period" icon={Receipt} gradient="kpi-blue" loading={loading} trend={toTrend(summary?.deltas?.bills)} />
         <KpiCard label="Avg Bill Value" value={summary ? formatCurrency(summary.avgBillValue) : '—'} sub="Per transaction" icon={Activity} gradient="kpi-emerald" loading={loading} />
         <KpiCard label="Best Day" value={summary ? formatCurrency(summary.bestDay.revenue) : '—'} sub={summary ? formatDate(summary.bestDay.date) : '—'} icon={Star} gradient="kpi-amber" loading={loading} />
       </div>
@@ -453,8 +536,8 @@ function StockTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Stock Value" value={summary ? formatCurrency(summary.totalStockValue) : '—'} sub="Total inventory" icon={Package} gradient="kpi-blue" loading={loading} />
         <KpiCard label="Dead Stock" value={summary ? formatCurrency(summary.deadStockValue) : '—'} sub={`${deadStockPct}% of inventory`} icon={AlertTriangle} gradient="kpi-amber" loading={loading} />
-        <KpiCard label="Top Category" value="Antibiotics" sub="By revenue" icon={TrendingUp} gradient="kpi-teal" loading={loading} />
-        <KpiCard label="Avg Margin" value="21.8%" sub="Gross margin" icon={Percent} gradient="kpi-purple" loading={loading} />
+        <KpiCard label="Top Category" value={summary?.topCategory ? summary.topCategory.replace(/\b\w/g, (c) => c.toUpperCase()) : '—'} sub="By revenue" icon={TrendingUp} gradient="kpi-teal" loading={loading} />
+        <KpiCard label="Avg Margin" value={summary ? `${summary.grossMarginPct}%` : '—'} sub="Gross margin" icon={Percent} gradient="kpi-purple" loading={loading} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -575,7 +658,7 @@ function ProfitTab({ data, loading }: { data?: ReportsData; loading: boolean }) 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Gross Profit" value={summary ? formatCurrency(summary.grossProfit) : '—'} sub="After purchase cost" icon={TrendingUp} gradient="kpi-emerald" loading={loading} trend={{ value: 5.2, positive: true }} />
+        <KpiCard label="Gross Profit" value={summary ? formatCurrency(summary.grossProfit) : '—'} sub="After purchase cost" icon={TrendingUp} gradient="kpi-emerald" loading={loading} trend={toTrend(summary?.deltas?.grossProfit)} />
         <KpiCard label="Gross Margin" value={summary ? `${summary.grossMarginPct}%` : '—'} sub="Of total revenue" icon={Percent} gradient="kpi-teal" loading={loading} />
         <KpiCard label="GST Liability" value={data ? formatCurrency(data.gstTotals.totalGST) : '—'} sub="Payable this period" icon={ShieldCheck} gradient="kpi-rose" loading={loading} />
         <KpiCard label="Net Revenue" value={summary ? formatCurrency(summary.totalRevenue - (data?.gstTotals.totalGST ?? 0)) : '—'} sub="After GST" icon={Receipt} gradient="kpi-blue" loading={loading} />
@@ -662,7 +745,7 @@ function CustomersTab({ data, loading }: { data?: ReportsData; loading: boolean 
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Total Customers" value={summary ? formatNumber(total) : '—'} sub="This period" icon={Users} gradient="kpi-blue" loading={loading} />
-        <KpiCard label="New Customers" value={summary ? formatNumber(summary.newCustomers) : '—'} sub="First-time visits" icon={ArrowUpRight} gradient="kpi-teal" loading={loading} trend={{ value: 14, positive: true }} />
+        <KpiCard label="New Customers" value={summary ? formatNumber(summary.newCustomers) : '—'} sub="vs previous period" icon={ArrowUpRight} gradient="kpi-teal" loading={loading} trend={toTrend(summary?.deltas?.newCustomers)} />
         <KpiCard label="Retention Rate" value={`${retentionPct}%`} sub="Returning customers" icon={Activity} gradient="kpi-purple" loading={loading} />
         <KpiCard label="Avg Spend" value={summary ? formatCurrency(Math.round(summary.totalRevenue / total)) : '—'} sub="Per customer" icon={TrendingUp} gradient="kpi-emerald" loading={loading} />
       </div>
@@ -1113,6 +1196,7 @@ export function ReportsView() {
       {/* Only the selected report renders */}
       <div className="mt-1">
         {activeTab === 'sales' && <SalesTab data={data} loading={isLoading} />}
+        {activeTab === 'purchase' && <PurchaseTab data={data} loading={isLoading} />}
         {activeTab === 'gst' && <GSTTab data={data} loading={isLoading} />}
         {activeTab === 'stock' && <StockTab data={data} loading={isLoading} />}
         {activeTab === 'profit' && <ProfitTab data={data} loading={isLoading} />}

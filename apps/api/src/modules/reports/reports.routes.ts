@@ -182,8 +182,10 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
     const nowIst = new Date(Date.now() + IST_OFFSET_MS);
     const istMidnightTodayMs = Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), nowIst.getUTCDate()) - IST_OFFSET_MS;
     const from = new Date(istMidnightTodayMs - (days - 1) * 86400000);
+    // Previous equal-length window, for period-over-period deltas (growth %).
+    const prevFrom = new Date(from.getTime() - days * 86400000);
 
-    const [bills, items, scheduleLog, inventory, customersInPeriod] = await Promise.all([
+    const [bills, items, scheduleLog, inventory, customersInPeriod, prevBills, purchaseOrders] = await Promise.all([
       prisma.bill.findMany({
         where: { tenantId, createdAt: { gte: from }, status: 'completed', deletedAt: null },
         include: { items: true },
@@ -204,6 +206,17 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
       prisma.customer.findMany({
         where: { tenantId, deletedAt: null },
         select: { id: true, name: true, phone: true, createdAt: true, totalVisits: true, totalSpend: true, loyaltyPoints: true, lastVisitDate: true },
+      }),
+      // Previous-period bills (for growth deltas) — lightweight projection.
+      prisma.bill.findMany({
+        where: { tenantId, createdAt: { gte: prevFrom, lt: from }, status: 'completed', deletedAt: null },
+        select: { totalAmount: true, taxAmount: true, customerId: true, createdAt: true, items: { select: { quantity: true, totalAmount: true, sellingPrice: true, medicine: { select: { purchasePrice: true } } } } },
+      }),
+      // Purchases in the period (vendor orders / goods received) for the Purchase report.
+      prisma.purchaseOrder.findMany({
+        where: { tenantId, deletedAt: null, orderDate: { gte: from } },
+        include: { items: true },
+        orderBy: { orderDate: 'desc' },
       }),
     ]);
 
@@ -383,6 +396,44 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
       return { hour: label, bills: hourCounts[h] ?? 0 };
     });
 
+    // Period-over-period deltas (growth %) vs the previous equal-length window.
+    const pct = (cur: number, prev: number) => (prev > 0 ? round2(((cur - prev) / prev) * 100) : cur > 0 ? 100 : 0);
+    const prevRevenue = prevBills.reduce((s, b) => s + Number(b.totalAmount), 0);
+    const prevGST = prevBills.reduce((s, b) => s + Number(b.taxAmount), 0);
+    const prevCost = prevBills.reduce((s, b) => s + b.items.reduce((c, i) => c + (i.medicine?.purchasePrice != null ? Number(i.medicine.purchasePrice) : Number(i.sellingPrice) * 0.8) * i.quantity, 0), 0);
+    const prevGrossProfit = prevRevenue - prevGST - prevCost;
+    const prevNewCustomers = customersInPeriod.filter(c => c.createdAt >= prevFrom && c.createdAt < from).length;
+    const deltas = {
+      revenue: pct(totalRevenue, prevRevenue),
+      bills: pct(totalBills, prevBills.length),
+      grossProfit: pct(grossProfit, prevGrossProfit),
+      newCustomers: pct(newCustomers, prevNewCustomers),
+    };
+
+    // Purchases (vendor orders) in the period — the Purchase report.
+    const purchaseTotal = round2(purchaseOrders.reduce((s, p) => s + Number(p.totalAmount), 0));
+    const purchaseGST = round2(purchaseOrders.reduce((s, p) => s + Number(p.taxAmount), 0));
+    const purchaseSubtotal = round2(purchaseOrders.reduce((s, p) => s + Number(p.subtotal), 0));
+    const vendMap = new Map<string, { value: number; orders: number }>();
+    for (const p of purchaseOrders) {
+      const e = vendMap.get(p.vendorName) ?? { value: 0, orders: 0 };
+      e.value += Number(p.totalAmount); e.orders++;
+      vendMap.set(p.vendorName, e);
+    }
+    const purchases = {
+      totalPurchase: purchaseTotal,
+      purchaseGST, purchaseSubtotal,
+      poCount: purchaseOrders.length,
+      receivedCount: purchaseOrders.filter(p => p.status === 'received' || p.status === 'partially_received').length,
+      pendingCount: purchaseOrders.filter(p => p.status === 'ordered').length,
+      byVendor: Array.from(vendMap.entries()).map(([vendor, v]) => ({ vendor, value: round2(v.value), orders: v.orders })).sort((a, b) => b.value - a.value),
+      recent: purchaseOrders.slice(0, 15).map(p => ({
+        poNumber: p.poNumber, vendor: p.vendorName, status: p.status,
+        date: p.orderDate.toISOString(), items: p.items.length,
+        qty: p.items.reduce((s, i) => s + i.quantity, 0), total: round2(Number(p.totalAmount)),
+      })),
+    };
+
     sendSuccess(res, {
       summary: {
         totalRevenue: round2(totalRevenue), totalBills, totalItems,
@@ -390,7 +441,10 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
         avgBillValue: totalBills > 0 ? Math.round(totalRevenue / totalBills) : 0,
         grossProfit, grossMarginPct, bestDay, paymentMethods,
         newCustomers, returningCustomers, deadStockValue, totalStockValue,
+        topCategory: categories[0]?.category ?? '—',
+        deltas,
       },
+      purchases,
       dailySales,
       topMedicines,
       salesByCategory,
