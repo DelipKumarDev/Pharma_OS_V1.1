@@ -81,6 +81,13 @@ export const settingsHandlers = [
     return HttpResponse.json({ success: true, data: SETTINGS });
   }),
 
+  // Operational subset used by the POS / receipts (no settings:view required).
+  http.get('/api/settings/public', async () => {
+    await delay(100);
+    const s = SETTINGS as Record<string, unknown>;
+    return HttpResponse.json({ success: true, data: { profile: s['profile'], billing: s['billing'], system: s['system'], receipt: s['receipt'] } });
+  }),
+
   http.patch('/api/settings/:section', async ({ params, request }) => {
     const section = params.section as keyof typeof SETTINGS;
     const body = await request.json() as Record<string, unknown>;

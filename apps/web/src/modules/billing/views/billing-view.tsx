@@ -436,7 +436,7 @@ async function printBill(bill: Bill, total: number, payMethod: string, meta: { p
   const billingOpts: BillingPrintOpts = {};
   if (isOnline()) {
     try {
-      const r = await apiFetch('/api/settings');
+      const r = await apiFetch('/api/settings/public');
       const j = await r.json() as { data?: { receipt?: Partial<ReceiptConfig>; profile?: Record<string, string | null>; billing?: Record<string, unknown> } };
       config = j.data?.receipt ?? {};
       const p = j.data?.profile ?? {};
@@ -729,7 +729,7 @@ export function BillingView() {
   const { data: pharmSettings } = useQuery({
     queryKey: ['billing-pharmacy-settings'],
     queryFn: async () => {
-      const r = await apiFetch('/api/settings');
+      const r = await apiFetch('/api/settings/public');
       const j = await r.json() as { data?: { profile?: Record<string, string>; billing?: Record<string, unknown> } };
       return j.data ?? {};
     },
@@ -878,7 +878,12 @@ export function BillingView() {
       const savedTotal = total;
       const savedPhone = customerPhone;
       const savedBillNo = bill.billNumber;
-      void printBill(bill, savedTotal, payMethod, { pharmacyName: user?.tenantName, cashier: user?.name });
+      // Honour the "Auto-print receipt on sale" toggle (Settings → Tax & Billing).
+      // Defaults to on when unset; when off, the cashier can still print from the
+      // bill's history view. Offline we always print (no server round-trip needed).
+      if (offline || (pharmSettings?.billing as { printReceiptOnSale?: boolean } | undefined)?.printReceiptOnSale !== false) {
+        void printBill(bill, savedTotal, payMethod, { pharmacyName: user?.tenantName, cashier: user?.name });
+      }
       clearPOS();
       if (offline) {
         toast.warning('Saved offline — will sync automatically', {

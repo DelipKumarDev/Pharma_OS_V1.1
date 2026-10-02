@@ -97,6 +97,37 @@ router.get('/', requirePermission('settings', 'view'), async (req: AuthRequest, 
   } catch (err) { next(err); }
 });
 
+// Operational settings needed by the POS and printed receipts (pharmacy header,
+// receipt layout, GST/thank-you/terms print options, UPI id, localization).
+// These are NOT sensitive — they print on every customer bill — so this is
+// gated by authentication only, NOT settings:view. That lets cashiers/
+// pharmacists (billing:create, no settings:view) render correct receipts and
+// payment options. Editing still requires settings:edit via PATCH below.
+router.get('/public', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: t(req) } });
+    if (!tenant) { res.status(404).json({ success: false, message: 'Tenant not found' }); return; }
+    sendSuccess(res, {
+      profile: {
+        pharmacyName: tenant.name, drugLicenseNumber: tenant.drugLicenseNumber,
+        licenseNumber: tenant.licenseNumber, gstNumber: tenant.gstNumber,
+        address: tenant.addressLine1, city: tenant.city, state: tenant.state,
+        pincode: tenant.pincode, phone: tenant.phone ?? '', mobile: tenant.mobile ?? '',
+        email: tenant.email ?? '', logoUrl: tenant.logoUrl,
+      },
+      billing: {
+        showGSTOnReceipt: tenant.showGSTOnReceipt, showGenericName: tenant.showGenericName,
+        termsOnReceipt: tenant.termsOnReceipt, thankYouMessage: tenant.thankYouMessage,
+        printReceiptOnSale: tenant.printReceiptOnSale, upiId: tenant.upiId,
+        acceptCash: tenant.acceptCash, acceptUPI: tenant.acceptUPI,
+        acceptCard: tenant.acceptCard, acceptCredit: tenant.acceptCredit,
+      },
+      system: { currency: tenant.currency, dateFormat: tenant.dateFormat, timezone: tenant.timezone },
+      receipt: resolveReceiptConfig(tenant.receiptConfig),
+    });
+  } catch (err) { next(err); }
+});
+
 router.patch('/:section', requirePermission('settings', 'edit'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const section = req.params['section'];
