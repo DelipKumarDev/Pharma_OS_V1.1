@@ -94,7 +94,7 @@ function PharmacyScene() {
 export default function LoginPage() {
   return (
     <div
-      className="min-h-screen flex p-3 lg:p-4 gap-3 lg:gap-4"
+      className="theme-light min-h-screen flex p-3 lg:p-4 gap-3 lg:gap-4 text-foreground"
       style={{
         backgroundColor: 'hsl(210 20% 91%)',
         backgroundImage: 'radial-gradient(circle, hsl(210 14% 78%) 1px, transparent 1px)',

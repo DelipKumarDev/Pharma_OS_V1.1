@@ -127,6 +127,41 @@
     --shadow-card: 0 4px 16px rgb(0 0 0 / 0.30), 0 1px 4px rgb(0 0 0 / 0.20);
     --shadow-card-hover: 0 12px 32px -4px rgb(0 0 0 / 0.40), 0 4px 12px rgb(0 0 0 / 0.25);
   }
+
+  /* Scoped light palette — forces a coherent LIGHT theme for a subtree (e.g. the
+     pre-auth login page) even when the app is in dark mode. Redeclares the core
+     color tokens so design-system components (Input, Button, Badge…) render light
+     inside, regardless of the .dark class on <html>. */
+  .theme-light {
+    color-scheme: light;
+    --background: 40 30% 98%;
+    --foreground: 224 32% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 32% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 32% 14%;
+    --primary: 175 77% 26%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 38 60% 94%;
+    --secondary-foreground: 32 80% 28%;
+    --muted: 40 22% 95%;
+    --muted-foreground: 215 16% 48%;
+    --accent: 32 95% 44%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 38 20% 88%;
+    --input: 38 20% 88%;
+    --ring: 175 77% 26%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --error: 0 72% 51%;
+    --error-foreground: 0 0% 100%;
+    --info: 244 58% 51%;
+    --info-foreground: 0 0% 100%;
+  }
 }
 
 @layer base {
