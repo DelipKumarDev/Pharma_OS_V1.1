@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { LoginForm } from '@/modules/auth/components/login-form';
-import { ShieldCheck, Package, Receipt, ClipboardList, BarChart2 } from 'lucide-react';
+import { ShieldCheck, Package, Receipt, ClipboardList, BarChart2, Sparkles } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Sign In',
@@ -8,87 +8,11 @@ export const metadata: Metadata = {
 };
 
 const FEATURES = [
-  { icon: Package,       line1: 'Inventory',   line2: 'Management'  },
-  { icon: Receipt,       line1: 'Fast',         line2: 'Billing'     },
-  { icon: ClipboardList, line1: 'Prescription', line2: 'Management'  },
-  { icon: BarChart2,     line1: 'Business',     line2: 'Insights'    },
+  { icon: Receipt,       title: 'Fast GST billing',     desc: 'Ring up a sale in seconds with barcode scan and batch picking.' },
+  { icon: Package,       title: 'Smart inventory',      desc: 'Live stock, batch and expiry tracking with auto reorder alerts.' },
+  { icon: ClipboardList, title: 'Prescriptions',        desc: 'Capture, verify and dispense Rx with a full compliance trail.' },
+  { icon: BarChart2,     title: 'Business insights',    desc: 'Sales, purchase, profit and GST reports at a glance.' },
 ] as const;
-
-/* ── Pharmacy scene illustration ── */
-function PharmacyScene() {
-  return (
-    <svg
-      viewBox="0 0 300 210"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className="w-full max-w-[310px]"
-      aria-hidden="true"
-    >
-      {/* Base platform */}
-      <ellipse cx="150" cy="196" rx="144" ry="14" fill="white" fillOpacity="0.07" />
-
-      {/* Back-left leaf */}
-      <path d="M38 178 C6 130 20 68 48 55 C64 48 76 72 70 102 C64 132 52 158 38 178Z"
-            fill="#2db891" fillOpacity="0.42" />
-      <line x1="48" y1="55" x2="38" y2="178" stroke="#1d9070" strokeOpacity="0.3" strokeWidth="1.5" />
-
-      {/* Back-right leaf */}
-      <path d="M263 172 C294 124 280 62 252 49 C236 42 224 66 230 96 C236 126 248 152 263 172Z"
-            fill="#2db891" fillOpacity="0.35" />
-      <line x1="252" y1="49" x2="263" y2="172" stroke="#1d9070" strokeOpacity="0.25" strokeWidth="1.5" />
-
-      {/* FIRST AID BRIEFCASE */}
-      {/* Handle */}
-      <path d="M103 117 C103 105 112 100 120 100 L138 100 C146 100 155 106 155 117"
-            stroke="#07443a" strokeWidth="6" strokeLinecap="round" fill="none" />
-      {/* Body */}
-      <rect x="84" y="115" width="88" height="72" rx="12" fill="#0e6b59" />
-      {/* Latch center line */}
-      <rect x="84" y="148" width="88" height="3" fill="#0a5244" fillOpacity="0.55" />
-      {/* Cross vertical */}
-      <rect x="120" y="130" width="16" height="44" rx="5" fill="white" fillOpacity="0.92" />
-      {/* Cross horizontal */}
-      <rect x="104" y="146" width="48" height="16" rx="5" fill="white" fillOpacity="0.92" />
-
-      {/* MEDICINE BOTTLE */}
-      {/* Cap */}
-      <rect x="208" y="106" width="36" height="18" rx="7" fill="#5c2c10" />
-      {/* Body */}
-      <rect x="204" y="121" width="44" height="62" rx="10" fill="#7c3a1a" />
-      {/* Shade */}
-      <rect x="236" y="121" width="12" height="62" rx="10" fill="black" fillOpacity="0.18" />
-      {/* Label band */}
-      <rect x="204" y="151" width="44" height="18" fill="white" fillOpacity="0.12" />
-      {/* Cross vertical */}
-      <rect x="222" y="127" width="8" height="28" rx="3" fill="white" fillOpacity="0.72" />
-      {/* Cross horizontal */}
-      <rect x="215" y="136" width="22" height="8" rx="3" fill="white" fillOpacity="0.72" />
-
-      {/* BLISTER PACK */}
-      <rect x="76" y="177" width="126" height="22" rx="6" fill="white" fillOpacity="0.84" />
-      <ellipse cx="96"  cy="175" rx="10" ry="11" fill="white" fillOpacity="0.68" />
-      <ellipse cx="121" cy="175" rx="10" ry="11" fill="white" fillOpacity="0.68" />
-      <ellipse cx="146" cy="175" rx="10" ry="11" fill="white" fillOpacity="0.68" />
-      <ellipse cx="171" cy="175" rx="10" ry="11" fill="white" fillOpacity="0.68" />
-      <ellipse cx="190" cy="175" rx="9"  ry="10" fill="white" fillOpacity="0.68" />
-
-      {/* LOOSE PILLS */}
-      {/* Green capsule left */}
-      <g transform="translate(40,188) rotate(-22)">
-        <rect width="38" height="16" rx="8" fill="#4ec49a" />
-        <rect width="19" height="16" rx="8" fill="#3aab82" />
-      </g>
-      {/* White capsule right */}
-      <g transform="translate(222,185) rotate(20)">
-        <rect width="34" height="14" rx="7" fill="white" fillOpacity="0.82" />
-        <rect width="17" height="14" rx="7" fill="white" fillOpacity="0.55" />
-      </g>
-      {/* Small round tablet */}
-      <circle cx="255" cy="192" r="10" fill="white" fillOpacity="0.62" />
-      <circle cx="255" cy="192" r="5"  fill="white" fillOpacity="0.38" />
-    </svg>
-  );
-}
 
 /* ── Page ── */
 export default function LoginPage() {
@@ -121,52 +45,66 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Headline */}
-        <div className="px-8 mt-8">
-          <h2 className="text-[31px] font-bold text-white leading-[1.2] tracking-tight">
+        {/* Headline + product intro */}
+        <div className="px-8 mt-7">
+          <h2 className="text-[29px] font-bold text-white leading-[1.18] tracking-tight">
             Smarter pharmacy.<br />
             <span className="text-emerald-400">First</span> with You.
           </h2>
-          <p className="mt-4 text-[13.5px] text-white/50 leading-relaxed">
-            A next-gen pharmacy management<br />system by Z2INFY Technologies.
+          <p className="mt-3.5 text-[13px] text-white/55 leading-relaxed max-w-[370px]">
+            Pharma Ist is the all-in-one platform that runs your pharmacy — billing,
+            inventory, prescriptions, GST compliance and analytics, together in one place.
           </p>
         </div>
 
-        {/* Feature grid */}
-        <div className="px-8 mt-6 grid grid-cols-4 gap-2">
-          {FEATURES.map(({ icon: Icon, line1, line2 }) => (
-            <div
-              key={line1 + line2}
-              className="flex flex-col items-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.06] p-3"
-            >
-              <Icon className="h-5 w-5 text-emerald-400" aria-hidden="true" />
-              <p className="text-[9px] font-medium text-white/50 text-center leading-[1.4]">
-                {line1}<br />{line2}
+        {/* Feature list — what Pharma Ist does */}
+        <ul className="px-8 mt-6 space-y-3">
+          {FEATURES.map(({ icon: Icon, title, desc }) => (
+            <li key={title} className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.06]">
+                <Icon className="h-[17px] w-[17px] text-emerald-400" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-white leading-tight">{title}</p>
+                <p className="mt-0.5 text-[11.5px] text-white/45 leading-snug">{desc}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {/* Spacer pushes the company block + footer to the bottom */}
+        <div className="flex-1 min-h-[16px]" />
+
+        {/* About Z2INFY — the company behind Pharma Ist */}
+        <div className="px-8">
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-emerald-400 shrink-0" aria-hidden="true" />
+              <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/75">
+                Built by Z2INFY Technologies
               </p>
             </div>
-          ))}
+            <p className="mt-2 text-[11.5px] text-white/50 leading-relaxed">
+              Z2INFY Technologies builds dependable, India-first business software.
+              Pharma Ist is crafted to help independent pharmacies run faster, stay
+              compliant and grow with confidence.
+            </p>
+          </div>
         </div>
 
-        {/* Illustration */}
-        <div className="flex flex-1 items-end justify-center px-6 pb-1 mt-2">
-          <PharmacyScene />
-        </div>
-
-        {/* Trust badge */}
-        <div className="px-8 pb-3 flex items-center gap-2">
-          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
-          <span className="text-[11px] text-white/38">
-            Trusted by pharmacies to deliver better care.
-          </span>
-        </div>
-
-        {/* Footer */}
-        <div className="px-8 pb-5 flex items-center justify-between text-[10.5px] text-white/25">
-          <span>© 2026 Z2INFY Technologies</span>
-          <div className="flex items-center gap-2">
-            <a href="/privacy" className="transition-colors duration-150 hover:text-white/50">Privacy</a>
-            <span className="text-white/20">|</span>
-            <a href="/terms" className="transition-colors duration-150 hover:text-white/50">Terms</a>
+        {/* Trust + footer */}
+        <div className="px-8 pt-4 pb-5">
+          <div className="flex items-center gap-2 text-white/45">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
+            <span className="text-[11px]">Trusted by pharmacies to deliver better care</span>
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t border-white/[0.07] pt-3 text-[10.5px] text-white/30">
+            <span>© 2026 Z2INFY Technologies</span>
+            <div className="flex items-center gap-2">
+              <a href="/privacy" className="transition-colors duration-150 hover:text-white/60">Privacy</a>
+              <span className="text-white/20">·</span>
+              <a href="/terms" className="transition-colors duration-150 hover:text-white/60">Terms</a>
+            </div>
           </div>
         </div>
       </div>
