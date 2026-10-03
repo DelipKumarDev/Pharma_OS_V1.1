@@ -185,7 +185,7 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
     // Previous equal-length window, for period-over-period deltas (growth %).
     const prevFrom = new Date(from.getTime() - days * 86400000);
 
-    const [bills, items, scheduleLog, inventory, customersInPeriod, prevBills, purchaseOrders] = await Promise.all([
+    const [bills, items, scheduleLog, inventory, customersInPeriod, prevBills, purchaseOrders, stockMovements, returnsInPeriod] = await Promise.all([
       prisma.bill.findMany({
         where: { tenantId, createdAt: { gte: from }, status: 'completed', deletedAt: null },
         include: { items: true },
@@ -217,6 +217,17 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
         where: { tenantId, deletedAt: null, orderDate: { gte: from } },
         include: { items: true },
         orderBy: { orderDate: 'desc' },
+      }),
+      // Stock movements in the period — the ledger for inventory reconciliation.
+      prisma.stockMovement.findMany({
+        where: { tenantId, createdAt: { gte: from } },
+        select: { movementType: true, previousQty: true, newQty: true },
+      }),
+      // Returns in the period (customer + vendor) for the Returns report.
+      prisma.returnRequest.findMany({
+        where: { tenantId, deletedAt: null, createdAt: { gte: from } },
+        select: { returnNumber: true, type: true, status: true, totalAmount: true, refundAmount: true, reason: true, customerName: true, vendorName: true, createdAt: true, items: { select: { returnQty: true } } },
+        orderBy: { createdAt: 'desc' },
       }),
     ]);
 
@@ -434,6 +445,62 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
       })),
     };
 
+    // Inventory reconciliation (units) from the stock-movement ledger:
+    // Opening + Purchases + Customer Returns − Sales − Disposals ± Adjustments = Closing.
+    let purIn = 0, retIn = 0, salesOut = 0, disposalOut = 0, adjNet = 0;
+    for (const m of stockMovements) {
+      const d = m.newQty - m.previousQty; // signed change
+      switch (m.movementType) {
+        case 'PURCHASE': purIn += d; break;
+        case 'RETURN': retIn += d; break;
+        case 'SALE': salesOut += -d; break;
+        case 'DISPOSAL': disposalOut += -d; break;
+        case 'ADJUSTMENT': adjNet += d; break;
+        default: break; // TRANSFER nets to zero tenant-wide
+      }
+    }
+    const closingUnits = inventory.reduce((s, i) => s + i.quantity, 0);
+    const openingUnits = closingUnits - purIn - retIn + salesOut + disposalOut - adjNet;
+    const reconciliation = {
+      opening: openingUnits,
+      purchases: purIn,
+      customerReturns: retIn,
+      sales: salesOut,
+      disposals: disposalOut,
+      adjustments: adjNet,
+      closing: closingUnits,
+      // Ledger identity — opening + inflows − outflows ± adjustments must equal closing.
+      balanced: openingUnits + purIn + retIn - salesOut - disposalOut + adjNet === closingUnits,
+    };
+
+    // Returns report (customer + vendor).
+    const custReturns = returnsInPeriod.filter(r => r.type === 'customer_return');
+    const vendReturns = returnsInPeriod.filter(r => r.type === 'vendor_return');
+    const reasonMap = new Map<string, { count: number; value: number }>();
+    for (const r of custReturns) {
+      const e = reasonMap.get(r.reason) ?? { count: 0, value: 0 };
+      e.count++; e.value += Number(r.totalAmount);
+      reasonMap.set(r.reason, e);
+    }
+    const returns = {
+      customer: {
+        count: custReturns.length,
+        totalValue: round2(custReturns.reduce((s, r) => s + Number(r.totalAmount), 0)),
+        refundValue: round2(custReturns.reduce((s, r) => s + Number(r.refundAmount), 0)),
+        byReason: Array.from(reasonMap.entries()).map(([reason, v]) => ({ reason, count: v.count, value: round2(v.value) })).sort((a, b) => b.value - a.value),
+      },
+      vendor: {
+        count: vendReturns.length,
+        totalValue: round2(vendReturns.reduce((s, r) => s + Number(r.totalAmount), 0)),
+      },
+      recent: returnsInPeriod.slice(0, 15).map(r => ({
+        returnNumber: r.returnNumber, type: r.type, status: r.status,
+        party: r.customerName ?? r.vendorName ?? '—', reason: r.reason,
+        qty: r.items.reduce((s, i) => s + (i.returnQty ?? 0), 0),
+        value: round2(Number(r.totalAmount)), date: r.createdAt.toISOString(),
+      })),
+    };
+
     sendSuccess(res, {
       summary: {
         totalRevenue: round2(totalRevenue), totalBills, totalItems,
@@ -445,6 +512,8 @@ router.get('/', requirePermission('reports', 'view'), async (req: AuthRequest, r
         deltas,
       },
       purchases,
+      reconciliation,
+      returns,
       dailySales,
       topMedicines,
       salesByCategory,

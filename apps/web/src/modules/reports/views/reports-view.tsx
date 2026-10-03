@@ -58,9 +58,20 @@ interface Purchases {
   byVendor: Array<{ vendor: string; value: number; orders: number }>;
   recent: Array<{ poNumber: string; vendor: string; status: string; date: string; items: number; qty: number; total: number }>;
 }
+interface Reconciliation {
+  opening: number; purchases: number; customerReturns: number; sales: number;
+  disposals: number; adjustments: number; closing: number; balanced: boolean;
+}
+interface ReturnsReport {
+  customer: { count: number; totalValue: number; refundValue: number; byReason: Array<{ reason: string; count: number; value: number }> };
+  vendor: { count: number; totalValue: number };
+  recent: Array<{ returnNumber: string; type: string; status: string; party: string; reason: string; qty: number; value: number; date: string }>;
+}
 interface ReportsData {
   summary: Summary;
   purchases?: Purchases;
+  reconciliation?: Reconciliation;
+  returns?: ReturnsReport;
   dailySales: DailySale[];
   topMedicines: Medicine[];
   categories: Category[];
@@ -95,6 +106,8 @@ const REPORT_META: Record<string, { label: string; desc: string }> = {
   purchase: { label: 'Purchase Report', desc: 'Vendor purchases, orders received and purchase value' },
   gst: { label: 'GST & Compliance', desc: 'GST slabs, GSTR-1 export and Schedule-H register' },
   stock: { label: 'Stock Intelligence', desc: 'Category revenue, margins and dead-stock alerts' },
+  reconciliation: { label: 'Stock Reconciliation', desc: 'Opening + Purchases + Returns − Sales ± Adjustments = Closing' },
+  returns: { label: 'Returns Report', desc: 'Customer & vendor returns, refunds and reasons' },
   profit: { label: 'Profitability', desc: 'Gross profit, margins and top medicines' },
   customers: { label: 'Customer Insights', desc: 'Acquisition, retention and top customers' },
   'daily-close': { label: 'Daily Close', desc: 'End-of-day cash reconciliation' },
@@ -223,6 +236,129 @@ function PurchaseTab({ data, loading }: { data?: ReportsData; loading: boolean }
                       <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground">{r.items} · {r.qty}u</td>
                       <td className="px-3 py-2.5 text-center"><Badge variant={PO_STATUS[r.status] ?? 'muted'} dot className="text-xs capitalize">{r.status.replace('_', ' ')}</Badge></td>
                       <td className="px-5 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab: Stock Reconciliation ───────────────────────────────────────────────
+
+function ReconciliationTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
+  const r = data?.reconciliation;
+  const u = (n: number) => `${n >= 0 ? '' : '−'}${formatNumber(Math.abs(n))} u`;
+  const rows: Array<{ label: string; value: number; kind: 'base' | 'in' | 'out' | 'adj' | 'total' }> = r ? [
+    { label: 'Opening Stock (start of period)', value: r.opening, kind: 'base' },
+    { label: 'Purchases / Goods Received', value: r.purchases, kind: 'in' },
+    { label: 'Customer Returns (restocked)', value: r.customerReturns, kind: 'in' },
+    { label: 'Sales', value: -r.sales, kind: 'out' },
+    { label: 'Disposals / Write-offs', value: -r.disposals, kind: 'out' },
+    { label: 'Adjustments (net)', value: r.adjustments, kind: 'adj' },
+    { label: 'Closing Stock (current)', value: r.closing, kind: 'total' },
+  ] : [];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label="Opening Stock" value={r ? `${formatNumber(r.opening)} u` : '—'} sub="Start of period" icon={Package} gradient="kpi-blue" loading={loading} />
+        <KpiCard label="Purchases In" value={r ? `${formatNumber(r.purchases + r.customerReturns)} u` : '—'} sub="Received + returns" icon={TrendingUp} gradient="kpi-teal" loading={loading} />
+        <KpiCard label="Sold / Out" value={r ? `${formatNumber(r.sales + r.disposals)} u` : '—'} sub="Sales + disposals" icon={Receipt} gradient="kpi-amber" loading={loading} />
+        <KpiCard label="Closing Stock" value={r ? `${formatNumber(r.closing)} u` : '—'} sub="Current on hand" icon={Package} gradient="kpi-emerald" loading={loading} />
+      </div>
+
+      <div className="rounded-xl border border-border bg-card">
+        <div className="flex items-center justify-between border-b border-border px-5 py-3">
+          <h3 className="text-sm font-semibold">Stock Movement Reconciliation (units)</h3>
+          {r && (
+            <Badge variant={r.balanced ? 'success' : 'destructive'} dot className="text-xs">
+              {r.balanced ? 'Balanced ✓' : 'Discrepancy'}
+            </Badge>
+          )}
+        </div>
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label} className={cn('border-b border-border/40 last:border-0', row.kind === 'total' && 'bg-muted/40 font-bold')}>
+                <td className="px-5 py-3">
+                  <span className={cn(row.kind === 'in' && 'text-success', row.kind === 'out' && 'text-destructive', row.kind === 'total' && 'text-base')}>{row.label}</span>
+                </td>
+                <td className={cn('px-5 py-3 text-right tabular-nums font-semibold',
+                  row.kind === 'in' && 'text-success', row.kind === 'out' && 'text-destructive')}>
+                  {row.kind === 'in' ? '+ ' : row.kind === 'out' ? '' : ''}{u(row.value)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="px-5 py-3 text-xs text-muted-foreground">
+          Opening + Purchases + Customer Returns − Sales − Disposals ± Adjustments = Closing. Opening is derived from the current closing balance and the period&apos;s movement ledger.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab: Returns Report ─────────────────────────────────────────────────────
+
+const RET_STATUS: Record<string, 'warning' | 'success' | 'muted' | 'destructive'> = {
+  pending: 'warning', approved: 'success', processed: 'muted', rejected: 'destructive',
+};
+
+function ReturnsTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
+  const ret = data?.returns;
+  const hasData = !!ret && (ret.customer.count > 0 || ret.vendor.count > 0);
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label="Customer Returns" value={ret ? formatNumber(ret.customer.count) : '—'} sub="In period" icon={Receipt} gradient="kpi-teal" loading={loading} />
+        <KpiCard label="Refund Value" value={ret ? formatCurrency(ret.customer.refundValue) : '—'} sub="Paid back to customers" icon={TrendingUp} gradient="kpi-amber" loading={loading} />
+        <KpiCard label="Return Value" value={ret ? formatCurrency(ret.customer.totalValue) : '—'} sub="Goods returned" icon={Package} gradient="kpi-purple" loading={loading} />
+        <KpiCard label="Vendor Returns" value={ret ? formatNumber(ret.vendor.count) : '—'} sub={ret ? formatCurrency(ret.vendor.totalValue) : ''} icon={Package} gradient="kpi-blue" loading={loading} />
+      </div>
+
+      {!hasData ? (
+        <div className="rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
+          <Receipt className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm font-medium">No returns in this period</p>
+          <p className="text-xs text-muted-foreground mt-1">Customer and vendor returns logged under Sales → Returns appear here.</p>
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-xl border border-border bg-card">
+            <div className="border-b border-border px-5 py-3"><h3 className="text-sm font-semibold">Returns by Reason (customer)</h3></div>
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-border/60 text-xs text-muted-foreground"><th className="px-5 py-2 text-left font-medium">Reason</th><th className="px-3 py-2 text-center font-medium">Count</th><th className="px-5 py-2 text-right font-medium">Value</th></tr></thead>
+              <tbody>
+                {ret!.customer.byReason.map((b) => (
+                  <tr key={b.reason} className="border-b border-border/40 last:border-0">
+                    <td className="px-5 py-2.5 capitalize">{b.reason.replace(/_/g, ' ')}</td>
+                    <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground">{b.count}</td>
+                    <td className="px-5 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(b.value)}</td>
+                  </tr>
+                ))}
+                {ret!.customer.byReason.length === 0 && <tr><td colSpan={3} className="px-5 py-6 text-center text-xs text-muted-foreground">No customer returns</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="rounded-xl border border-border bg-card">
+            <div className="border-b border-border px-5 py-3"><h3 className="text-sm font-semibold">Recent Returns</h3></div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-border/60 text-xs text-muted-foreground"><th className="px-5 py-2 text-left font-medium">Return No.</th><th className="px-3 py-2 text-left font-medium">Party</th><th className="px-3 py-2 text-center font-medium">Qty</th><th className="px-3 py-2 text-center font-medium">Status</th><th className="px-5 py-2 text-right font-medium">Value</th></tr></thead>
+                <tbody>
+                  {ret!.recent.map((r) => (
+                    <tr key={r.returnNumber} className="border-b border-border/40 last:border-0">
+                      <td className="px-5 py-2.5 font-mono text-xs font-semibold text-primary">{r.returnNumber}</td>
+                      <td className="px-3 py-2.5">{r.party}</td>
+                      <td className="px-3 py-2.5 text-center tabular-nums text-muted-foreground">{r.qty}</td>
+                      <td className="px-3 py-2.5 text-center"><Badge variant={RET_STATUS[r.status] ?? 'muted'} dot className="text-xs capitalize">{r.status}</Badge></td>
+                      <td className="px-5 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(r.value)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1199,6 +1335,8 @@ export function ReportsView() {
         {activeTab === 'purchase' && <PurchaseTab data={data} loading={isLoading} />}
         {activeTab === 'gst' && <GSTTab data={data} loading={isLoading} />}
         {activeTab === 'stock' && <StockTab data={data} loading={isLoading} />}
+        {activeTab === 'reconciliation' && <ReconciliationTab data={data} loading={isLoading} />}
+        {activeTab === 'returns' && <ReturnsTab data={data} loading={isLoading} />}
         {activeTab === 'profit' && <ProfitTab data={data} loading={isLoading} />}
         {activeTab === 'customers' && <CustomersTab data={data} loading={isLoading} />}
         {activeTab === 'daily-close' && <CashReconciliationTab data={data} loading={isLoading} />}
