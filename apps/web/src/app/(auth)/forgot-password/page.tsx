@@ -545,11 +545,11 @@ export default function ForgotPasswordPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-6">
 
-      {/* Back link — rendered on dark background */}
+      {/* Back link */}
       <div className="mb-4 w-full max-w-md">
         <Link
           href="/login"
-          className="inline-flex items-center gap-2 text-sm text-white/60 transition-colors hover:text-white"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to sign in
@@ -557,7 +557,7 @@ export default function ForgotPasswordPage() {
       </div>
 
       {/* Card */}
-      <div className="w-full max-w-md rounded-3xl bg-background p-8 shadow-2xl">
+      <div className="w-full max-w-md rounded-3xl bg-card border border-border p-8 shadow-xl">
 
         {/* Pharma Ist logo row */}
         <div className="mb-6 flex items-center gap-3">
