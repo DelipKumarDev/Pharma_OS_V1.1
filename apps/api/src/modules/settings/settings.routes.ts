@@ -609,7 +609,7 @@ router.post('/import/:type', requirePermission('settings', 'edit'), async (req: 
         const expiryDate = parseExpiryDate(getField(row, 'Expiry Date (MM/YYYY)', 'Expiry Date', 'Expiry', 'expiryDate'));
         if (!expiryDate) { errors.push({ row: i + 1, message: 'Expiry Date is required (MM/YYYY or YYYY-MM-DD)' }); continue; }
         const mrp = parseNum(getField(row, 'MRP')) ?? 0;
-        await prisma.inventoryItem.create({
+        const invItem = await prisma.inventoryItem.create({
           data: {
             tenantId,
             medicineId: med.id,
@@ -626,6 +626,13 @@ router.post('/import/:type', requirePermission('settings', 'edit'), async (req: 
             createdBy: req.user!.sub,
           },
         });
+        // Log a stock movement so imported stock is traceable in the ledger /
+        // audit trail and reconciles correctly (parity with single Add Stock).
+        if (qty > 0) {
+          await prisma.stockMovement.create({
+            data: { tenantId, medicineId: med.id, inventoryItemId: invItem.id, movementType: 'PURCHASE', quantity: qty, previousQty: 0, newQty: qty, referenceId: invItem.id, referenceType: 'import', notes: `Imported stock: batch ${batchNumber}`, createdBy: req.user!.sub },
+          });
+        }
         imported++;
       }
     } else if (type === 'opening-stock') {
@@ -679,7 +686,7 @@ router.post('/import/:type', requirePermission('settings', 'edit'), async (req: 
           medsCreated++;
         }
 
-        await prisma.inventoryItem.create({
+        const invItem = await prisma.inventoryItem.create({
           data: {
             tenantId,
             medicineId: med.id,
@@ -694,6 +701,12 @@ router.post('/import/:type', requirePermission('settings', 'edit'), async (req: 
             createdBy: req.user!.sub,
           },
         });
+        // Log the opening-stock inflow in the movement ledger (traceable + reconciles).
+        if (qty > 0) {
+          await prisma.stockMovement.create({
+            data: { tenantId, medicineId: med.id, inventoryItemId: invItem.id, movementType: 'PURCHASE', quantity: qty, previousQty: 0, newQty: qty, referenceId: invItem.id, referenceType: 'opening_stock_import', notes: `Opening stock import: batch ${batchNumber}`, createdBy: req.user!.sub },
+          });
+        }
         imported++;
       }
       sendSuccess(res, { imported, skipped, medsCreated, errors: errors.length, errorDetails: errors.slice(0, 50) },
