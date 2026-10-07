@@ -432,25 +432,35 @@ function SalesTab({ data, loading }: { data?: ReportsData; loading: boolean }) {
           </CardHeader>
           <CardContent>
             {loading ? <Skeleton className="h-48 w-full" /> : (
-              <div className="space-y-3">
-                {summary && Object.entries(summary.paymentMethods).map(([method, amount]) => {
-                  const total = Object.values(summary.paymentMethods).reduce((s, v) => s + v, 0);
-                  const pct = Math.round((amount / total) * 100);
-                  const colors: Record<string, string> = { cash: CHART_TEAL, upi: CHART_BLUE, card: CHART_PURPLE, credit: CHART_AMBER };
-                  const labels: Record<string, string> = { cash: 'Cash', upi: 'UPI / QR', card: 'Card', credit: 'Store Credit' };
-                  return (
-                    <div key={method}>
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium">{labels[method]}</span>
-                        <span className="text-muted-foreground">{formatCurrency(amount)} <span className="text-foreground font-semibold">({pct}%)</span></span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: colors[method] }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              (() => {
+                const colors: Record<string, string> = { cash: CHART_TEAL, upi: CHART_BLUE, card: CHART_PURPLE, credit: CHART_AMBER, unspecified: '#64748b' };
+                const labels: Record<string, string> = { cash: 'Cash', upi: 'UPI / QR', card: 'Card', credit: 'Store Credit', unspecified: 'Other' };
+                const entries = summary ? Object.entries(summary.paymentMethods) : [];
+                const total = entries.reduce((s, [, v]) => s + v, 0);
+                // Hide the "Other / unspecified" bucket unless it actually has revenue.
+                const rows = entries.filter(([method, amount]) => method !== 'unspecified' || amount > 0);
+                if (total <= 0) {
+                  return <p className="py-6 text-center text-sm text-muted-foreground">No sales in this period yet.</p>;
+                }
+                return (
+                  <div className="space-y-3">
+                    {rows.map(([method, amount]) => {
+                      const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
+                      return (
+                        <div key={method}>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="font-medium">{labels[method] ?? method}</span>
+                            <span className="text-muted-foreground">{formatCurrency(amount)} <span className="text-foreground font-semibold">({pct}%)</span></span>
+                          </div>
+                          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: colors[method] ?? '#64748b' }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>
