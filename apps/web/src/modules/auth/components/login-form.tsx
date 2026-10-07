@@ -38,32 +38,33 @@ const loginSchema = z.object({
 type LoginFormValues = z.infer<typeof loginSchema>;
 
 /* ── Demo accounts ── */
+const DEMO_PASSWORD = 'Divya@Care2026';
 const DEMO_ROLES = [
   {
     role: 'Admin',
     icon: Shield,
-    email: 'admin@divyapharmacy.com',
+    email: 'admin@divyacare.test',
     iconBg: 'bg-emerald-50',
     iconCls: 'text-emerald-600',
   },
   {
     role: 'Pharmacist',
     icon: Pill,
-    email: 'pharmacist@divyapharmacy.com',
+    email: 'ananya@divyacare.test',
     iconBg: 'bg-green-50',
     iconCls: 'text-green-600',
   },
   {
     role: 'Cashier',
     icon: CreditCard,
-    email: 'cashier@divyapharmacy.com',
+    email: 'suresh@divyacare.test',
     iconBg: 'bg-orange-50',
     iconCls: 'text-orange-500',
   },
   {
     role: 'Manager',
     icon: Users,
-    email: 'manager@divyapharmacy.com',
+    email: 'rahul.admin@divyacare.test',
     iconBg: 'bg-purple-50',
     iconCls: 'text-purple-600',
   },
@@ -204,7 +205,7 @@ export function LoginForm() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: 'Admin@123' }),
+        body: JSON.stringify({ email, password: DEMO_PASSWORD }),
       });
       const json = (await res.json()) as {
         success: boolean;
@@ -395,7 +396,7 @@ export function LoginForm() {
         </div>
         <p className="mt-2.5 text-[10px] text-muted-foreground">
           Password for all demo accounts:{' '}
-          <code className="font-mono font-semibold">Admin@123</code>
+          <code className="font-mono font-semibold">{DEMO_PASSWORD}</code>
         </p>
       </div>
 
