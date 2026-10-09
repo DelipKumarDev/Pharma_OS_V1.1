@@ -6,9 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { type ColumnDef } from '@tanstack/react-table';
 import {
   Package, AlertTriangle, CalendarX2, RotateCcw, Plus, Upload, Download,
-  MoreHorizontal, Eye, Edit2, Trash2, TrendingDown, CheckCircle,
-  Loader2, FileSpreadsheet, Archive, X, Pill, ShieldCheck,
-  ArrowUpDown, RefreshCw, Zap, Clock,
+  MoreHorizontal, Eye, Edit2, TrendingDown, CheckCircle,
+  Loader2, FileSpreadsheet, Archive, Pill, Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { InventoryItem, InventoryStats } from '@pharmaos/types';
@@ -49,23 +48,6 @@ async function fetchInventory(search = '', status = 'all', form = 'all'): Promis
   const json = await r.json() as { success: boolean; data: { data: InventoryItem[] } };
   if (!r.ok) throw new Error('Request failed');
   return json.data?.data ?? ([] as InventoryItem[]);
-}
-
-async function fetchMedicines(search = '', category = 'all'): Promise<Record<string, unknown>[]> {
-  const p = new URLSearchParams({ limit: '200' });
-  if (search) p.set('search', search);
-  if (category !== 'all') p.set('category', category);
-  const r = await apiFetch(`/api/medicines?${p}`);
-  const json = await r.json() as { success: boolean; data: { data: Record<string, unknown>[] } };
-  if (!r.ok) throw new Error('Request failed');
-  return json.data?.data ?? ([] as Record<string, unknown>[]);
-}
-
-async function fetchReorder(): Promise<Record<string, unknown>[]> {
-  const r = await apiFetch('/api/reorder?limit=100');
-  const json = await r.json() as { success: boolean; data: { data: Record<string, unknown>[] } };
-  if (!r.ok) throw new Error('Request failed');
-  return json.data?.data ?? ([] as Record<string, unknown>[]);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -363,14 +345,18 @@ export function StockView() {
   const [tab, setTab] = useState('overview');
 
   // Open the tab named by ?tab= and pre-apply a ?status= filter (e.g. dashboard
-  // "Low Stock Items" → Stock Levels tab filtered to low_stock).
+  // "Low Stock Items" → Stock Levels tab filtered to low_stock). Medicine catalog,
+  // expiry and reorder now live on their own dedicated pages, so legacy deep-links
+  // that targeted those former tabs are redirected there.
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get('tab');
-    if (t && ['overview', 'catalog', 'inventory', 'expiry', 'reorder'].includes(t)) setTab(t);
+    const legacy: Record<string, string> = { catalog: '/medicines', expiry: '/expiry', reorder: '/reorder' };
+    if (t && legacy[t]) { router.replace(legacy[t]); return; }
+    if (t && ['overview', 'inventory'].includes(t)) setTab(t);
     const s = params.get('status');
     if (s && ['available', 'low_stock', 'out_of_stock'].includes(s)) { setStatusFilter(s); setTab('inventory'); }
-  }, []);
+  }, [router]);
 
   const [showImport, setShowImport] = useState(false);
   const [addStockOpen, setAddStockOpen] = useState(false);
@@ -380,7 +366,6 @@ export function StockView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [formFilter, setFormFilter] = useState('all');
-  const [medSearch, setMedSearch] = useState('');
   const qc = useQueryClient();
 
   // Configurable medicine forms (Settings → Dropdown Options) for the Form filter.
@@ -410,19 +395,7 @@ export function StockView() {
   const { data: inventory = [], isLoading: invLoading } = useQuery({
     queryKey: ['inventory', search, statusFilter, formFilter],
     queryFn: () => fetchInventory(search, statusFilter, formFilter),
-    enabled: tab === 'inventory' || tab === 'expiry' || tab === 'overview',
-  });
-
-  const { data: medicines = [], isLoading: medLoading } = useQuery({
-    queryKey: ['medicines-stock', medSearch],
-    queryFn: () => fetchMedicines(medSearch),
-    enabled: tab === 'catalog',
-  });
-
-  const { data: reorderItems = [], isLoading: reorderLoading } = useQuery({
-    queryKey: ['reorder'],
-    queryFn: fetchReorder,
-    enabled: tab === 'reorder',
+    enabled: tab === 'inventory' || tab === 'overview',
   });
 
   // Expiry-filtered from inventory
@@ -522,194 +495,6 @@ export function StockView() {
     },
   ];
 
-  // ── Medicine catalog columns ──────────────────────────────────────────────────
-  const medicineColumns: ColumnDef<Record<string, unknown>>[] = [
-    {
-      accessorKey: 'name',
-      header: 'Medicine',
-      cell: ({ row }) => (
-        <div>
-          <p className="font-semibold text-sm">{String(row.original.name ?? '')}</p>
-          <p className="text-xs text-muted-foreground">{String(row.original.genericName ?? '')}</p>
-        </div>
-      ),
-    },
-    {
-      accessorKey: 'manufacturer',
-      header: 'Manufacturer',
-      cell: ({ row }) => <span className="text-xs">{String(row.original.manufacturer ?? '—')}</span>,
-    },
-    {
-      accessorKey: 'category',
-      header: 'Category',
-      cell: ({ row }) => <Badge variant="secondary" className="text-xs">{String(row.original.category ?? '')}</Badge>,
-    },
-    {
-      accessorKey: 'form',
-      header: 'Form',
-      cell: ({ row }) => <span className="text-xs capitalize text-muted-foreground">{String(row.original.form ?? row.original.dosageForm ?? '—')}</span>,
-    },
-    {
-      accessorKey: 'mrp',
-      header: ({ column }) => <SortableHeader column={column}>MRP</SortableHeader>,
-      cell: ({ row }) => <span className="text-sm tabular-nums">₹{Number(row.original.mrp ?? 0)}</span>,
-    },
-    {
-      accessorKey: 'schedule',
-      header: 'Schedule',
-      cell: ({ row }) => {
-        const s = String(row.original.schedule ?? '');
-        return s ? <Badge variant={s.includes('H') ? 'warning' : s === 'X' ? 'destructive' : 'muted'} className="text-xs">{s}</Badge> : <span className="text-xs text-muted-foreground">OTC</span>;
-      },
-    },
-    {
-      id: 'actions',
-      header: '',
-      cell: () => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => router.push('/medicines')}><Eye className="h-4 w-4" /> View in Medicine Master</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/medicines')}><Edit2 className="h-4 w-4" /> Edit in Medicine Master</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
-    },
-  ];
-
-  // ── Expiry columns ────────────────────────────────────────────────────────────
-  const expiryColumns: ColumnDef<InventoryItem>[] = [
-    {
-      id: 'medicine',
-      accessorFn: (row) => (row as { medicineName?: string }).medicineName ?? '',
-      header: 'Medicine / Batch',
-      cell: ({ row }) => {
-        const item = row.original as InventoryItem & { medicineName?: string };
-        return (
-          <div>
-            <p className="font-semibold text-sm">{item.medicineName ?? 'Unknown'}</p>
-            <p className="text-xs text-muted-foreground font-mono">{item.batchNumber}</p>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: 'availableQuantity',
-      header: 'Qty',
-      cell: ({ row }) => <span className="font-semibold text-sm">{row.original.availableQuantity}</span>,
-    },
-    {
-      accessorKey: 'expiryDate',
-      header: ({ column }) => <SortableHeader column={column}>Expires</SortableHeader>,
-      cell: ({ row }) => {
-        const days = daysUntilExpiry(row.original.expiryDate);
-        return (
-          <div>
-            <div>{expiryBadge(row.original.expiryDate)}</div>
-            <p className="text-2xs text-muted-foreground mt-0.5">{formatDate(row.original.expiryDate)}</p>
-          </div>
-        );
-      },
-    },
-    {
-      id: 'urgency',
-      header: 'Action Needed',
-      cell: ({ row }) => {
-        const days = daysUntilExpiry(row.original.expiryDate);
-        if (days <= 0) return <span className="text-xs text-destructive font-semibold">Mark Expired / Dispose</span>;
-        if (days <= 30) return <span className="text-xs text-destructive font-semibold">Return to vendor or dispose</span>;
-        if (days <= 60) return <span className="text-xs text-warning-600 font-semibold">Promote / discount stock</span>;
-        return <span className="text-xs text-muted-foreground">Monitor closely</span>;
-      },
-    },
-    {
-      id: 'actions',
-      header: '',
-      cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm"><MoreHorizontal className="h-4 w-4" /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => { if (confirm(`Mark batch ${row.original.batchNumber} as disposed?`)) updateStatusMutation.mutate({ id: row.original.id, status: 'damaged' }); }}><Trash2 className="h-4 w-4" /> Mark Disposed</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { if (confirm(`Mark batch ${row.original.batchNumber} as expired?`)) updateStatusMutation.mutate({ id: row.original.id, status: 'expired' }); }}><X className="h-4 w-4" /> Mark Expired</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
-    },
-  ];
-
-  // ── Reorder columns ───────────────────────────────────────────────────────────
-  const reorderColumns: ColumnDef<Record<string, unknown>>[] = [
-    {
-      id: 'medicine',
-      accessorFn: (row) => String(row.medicineName ?? row.name ?? ''),
-      header: 'Medicine',
-      cell: ({ row }) => (
-        <div>
-          <p className="font-semibold text-sm">{String(row.original.medicineName ?? row.original.name ?? '')}</p>
-          <p className="text-xs text-muted-foreground">{String(row.original.manufacturer ?? '')}</p>
-        </div>
-      ),
-    },
-    {
-      id: 'currentStock',
-      header: ({ column }) => <SortableHeader column={column}>Current / Reorder</SortableHeader>,
-      cell: ({ row }) => {
-        const cur = Number(row.original.currentStock ?? row.original.availableQuantity ?? 0);
-        const lvl = Number(row.original.reorderLevel ?? 50);
-        return (
-          <div>
-            <span className={cn('text-sm font-bold', cur < lvl ? 'text-destructive' : 'text-muted-foreground')}>{cur}</span>
-            <span className="text-xs text-muted-foreground"> / {lvl}</span>
-          </div>
-        );
-      },
-    },
-    {
-      id: 'suggestedQty',
-      header: 'Suggested Order',
-      cell: ({ row }) => {
-        const qty = Number(row.original.suggestedOrderQty ?? row.original.suggestedQty ?? 100);
-        return <span className="text-sm font-semibold text-primary">{qty} units</span>;
-      },
-    },
-    {
-      id: 'priority',
-      header: 'Priority',
-      cell: ({ row }) => {
-        const p = String(row.original.priority ?? 'medium');
-        const map: Record<string, { label: string; variant: 'destructive' | 'warning' | 'muted' }> = {
-          critical: { label: 'Critical', variant: 'destructive' },
-          high: { label: 'High', variant: 'warning' },
-          medium: { label: 'Medium', variant: 'muted' },
-        };
-        const cfg = map[p] ?? map.medium;
-        return <Badge variant={cfg!.variant} dot className="text-xs">{cfg!.label}</Badge>;
-      },
-    },
-    {
-      id: 'actions',
-      header: '',
-      cell: ({ row }) => {
-        const medicineId = String(row.original.medicineId ?? row.original.id ?? '');
-        const name = String(row.original.medicineName ?? row.original.name ?? '');
-        const qty = Number(row.original.suggestedOrderQty ?? row.original.suggestedQty ?? 100);
-        const cost = Number(row.original.lastPurchasePrice ?? 0);
-        return (
-          <div className="flex gap-1.5">
-            <Button size="sm" className="h-7 text-xs" onClick={() => router.push(
-              `/purchase-orders?new=1&medicineId=${encodeURIComponent(medicineId)}&name=${encodeURIComponent(name)}&qty=${qty}&cost=${cost}`,
-            )}>
-              <Plus className="h-3 w-3" /> Create PO
-            </Button>
-          </div>
-        );
-      },
-    },
-  ];
 
   return (
     <div className="space-y-5">
@@ -717,7 +502,7 @@ export function StockView() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Stock Management</h1>
-          <p className="text-sm text-muted-foreground">Medicine catalog, stock levels, expiry tracking and reorder — all in one place</p>
+          <p className="text-sm text-muted-foreground">Stock levels, batches and inventory health at a glance</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>
@@ -741,16 +526,22 @@ export function StockView() {
         </div>
       </div>
 
-      {/* Stats strip */}
+      {/* Stats strip — each card opens the relevant view (Medicine Catalog,
+          Stock Levels, Expiry Monitor and Reorder Queue each have their own page). */}
       {stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { icon: Package, label: 'Total Items', value: stats.totalMedicines, color: 'text-primary', bg: 'bg-primary/10', border: 'border-primary/20' },
-            { icon: AlertTriangle, label: 'Low Stock', value: stats.lowStockCount, color: 'text-warning-600', bg: 'bg-warning/10', border: 'border-warning/30', urgent: true },
-            { icon: CalendarX2, label: 'Expiring (90d)', value: stats.expiringSoonCount, color: 'text-destructive', bg: 'bg-destructive/10', border: 'border-destructive/20', urgent: true },
-            { icon: RotateCcw, label: 'Need Reorder', value: stats.outOfStockCount ?? reorderItems.length, color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20', border: 'border-orange-200 dark:border-orange-800' },
-          ].map(({ icon: Icon, label, value, color, bg, border, urgent }) => (
-            <div key={label} className={cn('flex items-center gap-3 rounded-xl border p-4', border, urgent && Number(value) > 0 && 'shadow-sm')}>
+            { icon: Package, label: 'Total Items', value: stats.totalMedicines, color: 'text-primary', bg: 'bg-primary/10', border: 'border-primary/20', onClick: () => router.push('/medicines') },
+            { icon: AlertTriangle, label: 'Low Stock', value: stats.lowStockCount, color: 'text-warning-600', bg: 'bg-warning/10', border: 'border-warning/30', urgent: true, onClick: () => { setStatusFilter('low_stock'); setTab('inventory'); } },
+            { icon: CalendarX2, label: 'Expiring (90d)', value: stats.expiringSoonCount, color: 'text-destructive', bg: 'bg-destructive/10', border: 'border-destructive/20', urgent: true, onClick: () => router.push('/expiry') },
+            { icon: RotateCcw, label: 'Need Reorder', value: stats.outOfStockCount, color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20', border: 'border-orange-200 dark:border-orange-800', onClick: () => router.push('/reorder') },
+          ].map(({ icon: Icon, label, value, color, bg, border, urgent, onClick }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={onClick}
+              className={cn('flex items-center gap-3 rounded-xl border p-4 text-left transition-all hover:border-primary/50', border, urgent && Number(value) > 0 && 'shadow-sm')}
+            >
               <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', bg)}>
                 <Icon className={cn('h-5 w-5', color)} />
               </div>
@@ -758,7 +549,7 @@ export function StockView() {
                 <p className="text-2xl font-bold leading-none">{value}</p>
                 <p className="text-xs text-muted-foreground mt-1">{label}</p>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -769,10 +560,7 @@ export function StockView() {
           <TabsList className="bg-transparent p-0 h-auto rounded-none gap-0">
             {[
               { value: 'overview', label: 'Overview', icon: Zap },
-              { value: 'catalog', label: 'Medicine Catalog', icon: Pill },
               { value: 'inventory', label: 'Stock Levels', icon: Package },
-              { value: 'expiry', label: 'Expiry Monitor', icon: CalendarX2, badge: stats?.expiringSoonCount },
-              { value: 'reorder', label: 'Reorder Queue', icon: RotateCcw, badge: stats?.lowStockCount },
             ].map((t) => (
               <TabsTrigger
                 key={t.value}
@@ -781,11 +569,6 @@ export function StockView() {
               >
                 <t.icon className="h-3.5 w-3.5" />
                 {t.label}
-                {t.badge !== undefined && t.badge > 0 && (
-                  <span className="rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
-                    {t.badge}
-                  </span>
-                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -821,7 +604,7 @@ export function StockView() {
                   <CalendarX2 className="h-4 w-4 text-warning-600" />
                   <span className="font-semibold text-sm text-warning-600">{expiringItems.length} items expiring within 90 days</span>
                 </div>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setTab('expiry')}>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => router.push('/expiry')}>
                   View All
                 </Button>
               </div>
@@ -860,27 +643,6 @@ export function StockView() {
               ))}
             </div>
           )}
-        </TabsContent>
-
-        {/* Catalog tab */}
-        <TabsContent value="catalog" className="pt-4">
-          <div className="flex gap-2 mb-4">
-            <div className="relative flex-1 max-w-sm">
-              <Input
-                placeholder="Search medicines…"
-                value={medSearch}
-                onChange={(e) => setMedSearch(e.target.value)}
-                className="pl-3 h-8 text-sm"
-              />
-            </div>
-          </div>
-          <DataTable
-            columns={medicineColumns}
-            data={medicines}
-            loading={medLoading}
-            emptyMessage="No medicines in catalog"
-            emptyDescription="Add medicines manually or use the Import button to bulk upload from Excel."
-          />
         </TabsContent>
 
         {/* Inventory / Stock Levels tab */}
@@ -925,34 +687,6 @@ export function StockView() {
           />
         </TabsContent>
 
-        {/* Expiry tab */}
-        <TabsContent value="expiry" className="pt-4">
-          {expiringItems.length === 0 && !invLoading ? (
-            <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
-              <ShieldCheck className="h-12 w-12 text-success/50" />
-              <p className="font-semibold text-success">All stock is well within expiry dates</p>
-              <p className="text-sm">No items expire within the next 90 days.</p>
-            </div>
-          ) : (
-            <DataTable
-              columns={expiryColumns}
-              data={expiringItems}
-              loading={invLoading}
-              emptyMessage="No expiring items"
-            />
-          )}
-        </TabsContent>
-
-        {/* Reorder tab */}
-        <TabsContent value="reorder" className="pt-4">
-          <DataTable
-            columns={reorderColumns}
-            data={reorderItems}
-            loading={reorderLoading}
-            emptyMessage="No items need reordering"
-            emptyDescription="When items fall below their reorder threshold, they'll appear here."
-          />
-        </TabsContent>
       </Tabs>
 
       {/* Sheets & dialogs */}
