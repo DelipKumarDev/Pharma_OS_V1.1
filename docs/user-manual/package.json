@@ -1,0 +1,12 @@
+{
+  "name": "pharma-ist-user-manual",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generator for the Pharma Ist end-user manual (Word .docx).",
+  "scripts": {
+    "build": "node build-manual.js"
+  },
+  "dependencies": {
+    "docx": "8.5.0"
+  }
+}
