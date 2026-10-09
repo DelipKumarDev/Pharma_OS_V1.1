@@ -42,7 +42,16 @@ pnpm dev                                        # web :3000 + api :4000
 pnpm type-check                                 # strict tsc (the quality gate)
 ```
 
-Demo credentials (seeded, **development only**): `admin@divyapharmacy.com` / `Admin@123`.
+Demo credentials (seeded, **development only**) — tenant **Divya Care Pharmacy**, password `Divya@Care2026` for all:
+
+| Role | Email |
+| --- | --- |
+| Admin | `admin@divyacare.test` |
+| Pharmacist | `ananya@divyacare.test` |
+| Cashier | `suresh@divyacare.test` |
+| Manager | `rahul.admin@divyacare.test` |
+
+These match the one-click **demo-account buttons** on the login page.
 
 ## Production deployment
 

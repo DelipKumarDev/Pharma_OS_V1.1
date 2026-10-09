@@ -17,17 +17,17 @@ async function main() {
 
   // ─── Tenant ───────────────────────────────────────────────────────────────
   const tenant = await prisma.tenant.upsert({
-    where: { slug: 'divya-pharmacy' },
+    where: { slug: 'divya-care-pharmacy' },
     update: {},
     create: {
       id: 'tnt_001',
-      name: 'Divya Pharmacy',
-      slug: 'divya-pharmacy',
+      name: 'Divya Care Pharmacy',
+      slug: 'divya-care-pharmacy',
       type: 'retail',
       status: 'active',
       plan: 'professional',
       phone: '+91-9876543210',
-      email: 'admin@divyapharmacy.com',
+      email: 'admin@divyacare.test',
       addressLine1: '12, MG Road',
       addressLine2: 'Near Central Hospital',
       city: 'Bangalore',
@@ -48,7 +48,7 @@ async function main() {
       requirePrescription: true,
       enableOfflineMode: true,
       termsOnReceipt: 'Medicines once sold will not be taken back. Verify before purchase.',
-      thankYouMessage: 'Thank you for choosing Divya Pharmacy! Get well soon.',
+      thankYouMessage: 'Thank you for choosing Divya Care Pharmacy! Get well soon.',
     },
   });
   console.log('✅ Tenant created:', tenant.name);
@@ -235,13 +235,14 @@ async function main() {
   console.log('✅ Roles seeded');
 
   // ─── Users ────────────────────────────────────────────────────────────────
-  const passwordHash = await bcrypt.hash('Admin@123', 12);
+  const passwordHash = await bcrypt.hash('Divya@Care2026', 12);
 
   const users = [
-    { id: 'usr_001', email: 'admin@divyapharmacy.com', name: 'Rahul Sharma', phone: '9876543210', roleId: adminRole.id },
-    { id: 'usr_002', email: 'pharmacist@divyapharmacy.com', name: 'Priya Patel', phone: '9812345678', roleId: pharmacistRole.id },
-    { id: 'usr_003', email: 'inventory@divyapharmacy.com', name: 'Amit Joshi', phone: '9898765432', roleId: inventoryRole.id },
-    { id: 'usr_004', email: 'billing@divyapharmacy.com', name: 'Sunita Khanna', phone: '9765432109', roleId: billingRole.id },
+    { id: 'usr_001', email: 'admin@divyacare.test', name: 'Divya Kumar', phone: '9876543210', roleId: adminRole.id },
+    { id: 'usr_002', email: 'ananya@divyacare.test', name: 'Ananya Rao', phone: '9812345678', roleId: pharmacistRole.id },
+    { id: 'usr_003', email: 'inventory@divyacare.test', name: 'Amit Joshi', phone: '9898765432', roleId: inventoryRole.id },
+    { id: 'usr_004', email: 'suresh@divyacare.test', name: 'Suresh Kumar', phone: '9765432109', roleId: billingRole.id },
+    { id: 'usr_005', email: 'rahul.admin@divyacare.test', name: 'Rahul Sharma', phone: '9898761122', roleId: adminRole.id },
   ];
 
   for (const u of users) {
@@ -446,11 +447,12 @@ async function main() {
   console.log('✅ Reorder items seeded');
 
   console.log('\n🎉 Seed completed successfully!');
-  console.log('\n📝 Demo Login Credentials:');
-  console.log('   Admin:      admin@divyapharmacy.com      / Admin@123');
-  console.log('   Pharmacist: pharmacist@divyapharmacy.com / Admin@123');
-  console.log('   Inventory:  inventory@divyapharmacy.com  / Admin@123');
-  console.log('   Billing:    billing@divyapharmacy.com    / Admin@123');
+  console.log('\n📝 Demo Login Credentials (password for all: Divya@Care2026):');
+  console.log('   Admin:      admin@divyacare.test');
+  console.log('   Pharmacist: ananya@divyacare.test');
+  console.log('   Cashier:    suresh@divyacare.test');
+  console.log('   Manager:    rahul.admin@divyacare.test');
+  console.log('   Inventory:  inventory@divyacare.test');
 }
 
 main()

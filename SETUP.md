@@ -99,12 +99,16 @@ The frontend runs on **http://localhost:3001** (or 3000 if available)
 
 ## Demo Login Credentials
 
+Seeded tenant: **Divya Care Pharmacy**. Password for all demo accounts: **`Divya@Care2026`**.
+The first four match the one-click demo-account buttons on the login page.
+
 | Role | Email | Password |
 |------|-------|----------|
-| Admin | admin@divyapharmacy.com | Admin@123 |
-| Pharmacist | pharmacist@divyapharmacy.com | Admin@123 |
-| Inventory Manager | inventory@divyapharmacy.com | Admin@123 |
-| Billing Assistant | billing@divyapharmacy.com | Admin@123 |
+| Admin | admin@divyacare.test | Divya@Care2026 |
+| Pharmacist | ananya@divyacare.test | Divya@Care2026 |
+| Cashier / Billing Assistant | suresh@divyacare.test | Divya@Care2026 |
+| Manager (Pharma Admin) | rahul.admin@divyacare.test | Divya@Care2026 |
+| Inventory Manager | inventory@divyacare.test | Divya@Care2026 |
 
 ---
 

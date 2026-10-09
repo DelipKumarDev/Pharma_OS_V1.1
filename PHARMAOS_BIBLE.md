@@ -111,8 +111,12 @@ PharmaOS/
 │   ├── web/                         # Next.js 15 frontend
 │   │   ├── src/
 │   │   │   ├── app/
-│   │   │   │   ├── (auth)/          # Login page (unauthenticated layout)
-│   │   │   │   │   └── login/page.tsx
+│   │   │   │   ├── (auth)/          # Login + forgot-password (forced-light, unauthenticated layout)
+│   │   │   │   │   ├── login/page.tsx
+│   │   │   │   │   └── forgot-password/page.tsx
+│   │   │   │   ├── (legal)/         # Public Privacy Policy + Terms (no auth; linked from login footer)
+│   │   │   │   │   ├── privacy/page.tsx
+│   │   │   │   │   └── terms/page.tsx
 │   │   │   │   └── (dashboard)/     # All app pages (authenticated layout)
 │   │   │   │       ├── layout.tsx   # Header + sidebar shell
 │   │   │   │       ├── dashboard/page.tsx
@@ -508,8 +512,8 @@ Paginated response format (inside `data`):
 **Login request:**
 ```json
 {
-  "email": "admin@divyapharmacy.com",
-  "password": "Admin@123",
+  "email": "admin@divyacare.test",
+  "password": "Divya@Care2026",
   "tenantId": "demo"
 }
 ```
@@ -520,10 +524,10 @@ Paginated response format (inside `data`):
   "tokens": { "accessToken": "...", "refreshToken": "..." },
   "user": {
     "id": "...",
-    "email": "admin@divyapharmacy.com",
-    "name": "Rahul Sharma",
+    "email": "admin@divyacare.test",
+    "name": "Divya Kumar",
     "tenantId": "tnt_001",
-    "tenantName": "Divya Pharmacy",
+    "tenantName": "Divya Care Pharmacy",
     "roles": ["Pharma Admin"],
     "permissions": ["billing:create", "inventory:read", ...]
   }
@@ -1032,14 +1036,12 @@ Invalid `schedule` values → 400. Entries are created automatically by the bill
 - Re-approving an already approved return → 400 (protected)
 
 #### Stock & Inventory (`/stock`)
-- Multi-tab view: Overview, Catalog, Stock Levels, Expiry, Reorder
-- **Overview**: Summary cards (total SKUs, low stock, out of stock, expiring soon)
-- **Catalog**: Medicine master list with search, category filter
-- **Stock Levels**: Batch-level inventory with status filters
-- **Expiry**: Batches grouped by expiry urgency
-- **Reorder**: Items below reorder level with priority indicators
-- Add Stock Sheet (slide-in panel): batch number, expiry, purchase price, qty, rack location
-- Adjust Stock Dialog: quantity adjustment with reason and type
+- Two-tab hub: **Overview** and **Stock Levels** — the batch-level stock views. Medicine Catalog, Expiry Monitor and Reorder Queue are **dedicated pages** (`/medicines`, `/expiry`, `/reorder`), not tabs, to avoid duplicating one destination in both the sidebar and a tab.
+- **Overview**: stock-health cards (good / low / critical) and an expiring-soon quick-alert; the four KPI cards at the top (Total Items, Low Stock, Expiring 90d, Need Reorder) are clickable and open the relevant page.
+- **Stock Levels**: Batch-level inventory with status + form filters, Import/Export.
+- Add Stock Sheet (slide-in panel): batch number, expiry, purchase price, qty, rack location.
+- Adjust Stock Dialog: quantity adjustment with reason and type (the former standalone Stock Adjustment page is folded in here).
+- Legacy deep-links `/stock?tab=catalog|expiry|reorder` redirect to the matching dedicated page.
 
 #### Medicine Master (`/medicines`)
 - Full medicine catalog: name, generic name, manufacturer, form, strength, category, MRP, GST rate
@@ -1421,12 +1423,15 @@ pnpm --filter @pharmaos/api db:reset
 
 ### Login Credentials
 
+Seeded tenant: **Divya Care Pharmacy**. The first four rows match the one-click demo-account buttons on the login page.
+
 | Role | Email | Password |
 |------|-------|----------|
-| Pharma Admin | `admin@divyapharmacy.com` | `Admin@123` |
-| Pharmacist | `pharmacist@divyapharmacy.com` | `Admin@123` |
-| Inventory Manager | `inventory@divyapharmacy.com` | `Admin@123` |
-| Billing Assistant | `billing@divyapharmacy.com` | `Admin@123` |
+| Admin (owner) | `admin@divyacare.test` | `Divya@Care2026` |
+| Pharmacist | `ananya@divyacare.test` | `Divya@Care2026` |
+| Cashier / Billing Assistant | `suresh@divyacare.test` | `Divya@Care2026` |
+| Manager (Pharma Admin) | `rahul.admin@divyacare.test` | `Divya@Care2026` |
+| Inventory Manager | `inventory@divyacare.test` | `Divya@Care2026` |
 
 New users invited via the app receive temporary password: `Welcome@123`
 

@@ -50,7 +50,7 @@ Refusing to start with unsafe production configuration. Fix the above and restar
 
 ## 3. Seed safety (new)
 
-`prisma/seed.ts` creates **demo data with known credentials** (`admin@divyapharmacy.com`). It now refuses to run when `NODE_ENV=production` unless `ALLOW_PROD_SEED=true` is explicitly set:
+`prisma/seed.ts` creates **demo data with known credentials** (`admin@divyacare.test` / `Divya@Care2026`). It now refuses to run when `NODE_ENV=production` unless `ALLOW_PROD_SEED=true` is explicitly set:
 ```
 ❌ Refusing to seed: NODE_ENV=production. This seed creates DEMO data with known credentials.
    If you really intend to seed production, set ALLOW_PROD_SEED=true. (You almost never want this.)

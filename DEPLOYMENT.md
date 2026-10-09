@@ -117,7 +117,7 @@ Open `http://localhost:3000` on the counter PC. Other devices on the shop Wi-Fi 
 | ✅ SMS provider (optional) | MSG91 (needs DLT registration) or Twilio |
 | ✅ Rate limits | Defaults are production-safe (300 req/15 min, 5 login attempts) |
 | ✅ Firewall | Only 80/443 exposed; DB port 5432 never public |
-| ✅ Seed credentials rotated | Change `Admin@123` passwords immediately after first login |
+| ✅ Seed credentials rotated | Change the `Divya@Care2026` demo passwords immediately after first login |
 
 ## Thermal printer setup (billing counter)
 

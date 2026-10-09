@@ -121,18 +121,18 @@ docker compose exec api npx tsx prisma/seed.ts
 - [ ] Seed completed (creates tenant, roles, permissions, demo medicines).
 
 ### ⚠️ Immediately change the seeded admin password
-The seed creates `admin@divyapharmacy.com` / `Admin@123` — a **known default**.
+The seed creates `admin@divyacare.test` / `Divya@Care2026` — a **known default**.
 Log in as admin in the browser and change it under **Settings/profile**, OR via API:
 
 ```bash
 # get a token, then change password (replace NEWPASS with a strong one)
 TOKEN=$(curl -s -X POST https://billing.yourpharmacy.in/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@divyapharmacy.com","password":"Admin@123"}' | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
+  -d '{"email":"admin@divyacare.test","password":"Divya@Care2026"}' | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
 
 curl -s -X POST https://billing.yourpharmacy.in/api/auth/password/change \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"currentPassword":"Admin@123","newPassword":"NEWPASS_Strong@1"}'
+  -d '{"currentPassword":"Divya@Care2026","newPassword":"NEWPASS_Strong@1"}'
 ```
 
 - [ ] Default admin password changed.
@@ -155,7 +155,7 @@ curl -s $BASE/health                                            # {"status":"ok"
 
 # 3. Login (with the NEW admin password)
 curl -s -X POST $BASE/api/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"admin@divyapharmacy.com","password":"NEWPASS_Strong@1"}'  # tokens returned
+  -d '{"email":"admin@divyacare.test","password":"NEWPASS_Strong@1"}'  # tokens returned
 
 # 4. Unauthenticated call is blocked
 curl -s -o /dev/null -w "%{http_code}\n" $BASE/api/medicines     # expect 401
